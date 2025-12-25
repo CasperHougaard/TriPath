@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TriPath</string>
+    
+    <!-- Health Connect -->
+    <string name="health_connect_rationale_title">Health Connect Permissions</string>
+    <string name="health_connect_rationale_message">TriPath needs access to your workout data from Health Connect to sync completed workouts from Garmin and other fitness apps.</string>
+    
+    <!-- Workout Types -->
+    <string name="workout_type_run">Run</string>
+    <string name="workout_type_bike">Bike</string>
+    <string name="workout_type_swim">Swim</string>
+    <string name="workout_type_strength">Strength</string>
+    
+    <!-- Strength Focus -->
+    <string name="strength_focus_full_body">Full Body</string>
+    <string name="strength_focus_upper">Upper Body</string>
+    <string name="strength_focus_lower">Lower Body</string>
+    
+    <!-- Intensity -->
+    <string name="intensity_light">Light</string>
+    <string name="intensity_heavy">Heavy</string>
+    
+    <!-- Backup -->
+    <string name="backup_export_success">Backup exported successfully</string>
+    <string name="backup_import_success">Backup imported successfully</string>
+    <string name="backup_import_error">Error importing backup</string>
+    <string name="backup_clear_confirm">Are you sure you want to delete all data? This cannot be undone.</string>
+</resources>
+

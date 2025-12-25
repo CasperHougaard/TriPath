@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.TriPath" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Primary brand color -->
+        <item name="android:colorPrimary">#1565C0</item>
+        <item name="android:colorPrimaryDark">#0D47A1</item>
+        <item name="android:colorAccent">#FF6F00</item>
+        
+        <!-- Status bar color -->
+        <item name="android:statusBarColor">?android:attr/colorPrimaryDark</item>
+        
+        <!-- Navigation bar -->
+        <item name="android:navigationBarColor">@android:color/white</item>
+    </style>
+</resources>
+

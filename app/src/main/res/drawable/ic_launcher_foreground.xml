@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Simple triathlon icon: swim, bike, run symbols -->
+    <group android:translateX="27" android:translateY="27">
+        <!-- Simplified path representing motion/speed -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M27,10 L27,44 M10,27 L44,27 M15,15 L39,39 M39,15 L15,39"
+            android:strokeWidth="4"
+            android:strokeColor="#FFFFFF"/>
+        <!-- Center circle -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M27,27 m-8,0 a8,8 0 1,1 16,0 a8,8 0 1,1 -16,0"/>
+    </group>
+</vector>
+

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+   Sample backup rules file; customize as necessary.
+   See https://developer.android.com/guide/topics/data/autobackup
+   for details.
+-->
+<full-backup-content>
+    <!-- Exclude database from auto backup since we have our own backup system -->
+    <exclude domain="database" path="tripath_database" />
+</full-backup-content>
+

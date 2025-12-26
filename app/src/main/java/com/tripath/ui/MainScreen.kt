@@ -86,7 +86,8 @@ fun MainScreen(
         modifier = modifier
     ) { paddingValues ->
         TriPathNavigation(
-            navController = navController
+            navController = navController,
+            modifier = Modifier.padding(paddingValues)
         )
     }
 }

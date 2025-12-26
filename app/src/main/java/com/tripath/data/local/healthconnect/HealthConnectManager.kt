@@ -51,13 +51,10 @@ class HealthConnectManager @Inject constructor(
     }
 
     /**
-     * Create a permission launcher contract for requesting permissions.
+     * Get the permission request contract for Health Connect.
+     * This should be used with ActivityResultLauncher in the UI layer.
      */
-    fun createPermissionContract(): PermissionController.PermissionLauncher {
-        // This should be called from an Activity/Fragment context
-        // The actual launcher creation happens in the UI layer
-        TODO("Create permission launcher in UI layer using ActivityResultLauncher")
-    }
+    fun getPermissionsToRequest() = permissions
 
     /**
      * Read exercise sessions from Health Connect within a date range.

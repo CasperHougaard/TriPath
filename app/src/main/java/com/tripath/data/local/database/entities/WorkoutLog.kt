@@ -18,7 +18,7 @@ data class WorkoutLog(
     /** The date the workout was completed */
     val date: LocalDate,
     
-    /** Type of workout: RUN, BIKE, SWIM, or STRENGTH */
+    /** Type of workout: RUN, BIKE, SWIM, STRENGTH, or OTHER */
     val type: WorkoutType,
     
     /** Actual duration in minutes */
@@ -31,6 +31,18 @@ data class WorkoutLog(
     val calories: Int? = null,
     
     /** Computed Training Stress Score based on workout data (optional) */
-    val computedTSS: Int? = null
+    val computedTSS: Int? = null,
+
+    /** Total distance in meters (optional) */
+    val distanceMeters: Double? = null,
+
+    /** Average speed in km/h (optional) */
+    val avgSpeedKmh: Double? = null,
+
+    /** Average power in Watts (optional) */
+    val avgPowerWatts: Int? = null,
+
+    /** Total steps (optional) */
+    val steps: Int? = null
 )
 

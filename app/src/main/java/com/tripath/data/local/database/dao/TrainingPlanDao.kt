@@ -43,6 +43,12 @@ interface TrainingPlanDao {
     fun getByDateRange(startDate: Long, endDate: Long): Flow<List<TrainingPlan>>
 
     /**
+     * Get training plans within a date range (as a list).
+     */
+    @Query("SELECT * FROM training_plans WHERE date >= :startDate AND date <= :endDate ORDER BY date ASC")
+    suspend fun getByDateRangeOnce(startDate: Long, endDate: Long): List<TrainingPlan>
+
+    /**
      * Get training plans by workout type.
      */
     @Query("SELECT * FROM training_plans WHERE type = :type ORDER BY date ASC")

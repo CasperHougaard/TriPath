@@ -1,25 +1,47 @@
 package com.tripath.ui.planner
 
+import com.tripath.data.model.WorkoutType
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
+import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.repository.TrainingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
+import kotlin.math.ceil
+
+data class WeeklyRowState(
+    val weekStart: LocalDate,
+    val days: List<WeekDay>,
+    val plannedTSS: Int,
+    val actualTSS: Int,
+    val totalDurationMinutes: Int,
+    val tssCompletionProgress: Float,
+    val hasTssJumpWarning: Boolean = false,
+    val monthLabel: String? = null // Label if month changes at this week
+)
 
 data class WeeklyPlannerUiState(
-    val weekDays: List<WeekDay> = emptyList(),
+    val weeklyRows: List<WeeklyRowState> = emptyList(),
+    val startDate: LocalDate = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
+    val disciplineDistribution: Map<WorkoutType, Float> = emptyMap(),
     val selectedDate: LocalDate? = null,
-    val showBottomSheet: Boolean = false
+    val showBottomSheet: Boolean = false,
+    val includeImportedActivities: Boolean = false,
+    val isMonthView: Boolean = false
 )
 
 @HiltViewModel
@@ -30,39 +52,179 @@ class WeeklyPlannerViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(WeeklyPlannerUiState())
     val uiState: StateFlow<WeeklyPlannerUiState> = _uiState.asStateFlow()
 
-    private val dayNameFormatter = DateTimeFormatter.ofPattern("EEEE")
-    private val dateFormatter = DateTimeFormatter.ofPattern("MMM d")
+    private val _isMonthView = MutableStateFlow(false)
+    private val _startDate = MutableStateFlow(
+        LocalDate.now()
+            .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    )
+    private val _includeImportedActivities = MutableStateFlow(false)
+
+    private val dayNameFormatter = DateTimeFormatter.ofPattern("E") // Short day name for high density
+    private val monthFormatter = DateTimeFormatter.ofPattern("MMMM")
 
     init {
-        loadWeekData()
+        loadMatrixData()
     }
 
-    private fun loadWeekData() {
+    private fun getReferenceMonth(start: LocalDate, isMonthView: Boolean): LocalDate {
+        if (isMonthView) {
+            // In month view, the start date is the Monday of the week containing the 1st
+            // So we can find the 1st by looking ahead up to 6 days
+            return (0..6).map { start.plusDays(it.toLong()) }.firstOrNull { it.dayOfMonth == 1 } 
+                ?: start.plusDays(7).with(TemporalAdjusters.firstDayOfMonth()) // Fallback
+        } else {
+            // In rolling view, find the month of the "center" of the view (start + 14 days)
+            return start.plusDays(14).with(TemporalAdjusters.firstDayOfMonth())
+        }
+    }
+
+    fun previousMonth() {
+        val currentRefMonth = getReferenceMonth(_startDate.value, _isMonthView.value)
+        val prevMonthFirst = currentRefMonth.minusMonths(1)
+        _isMonthView.value = true
+        _startDate.value = prevMonthFirst.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    }
+
+    fun nextMonth() {
+        val currentRefMonth = getReferenceMonth(_startDate.value, _isMonthView.value)
+        val nextMonthFirst = currentRefMonth.plusMonths(1)
+        _isMonthView.value = true
+        _startDate.value = nextMonthFirst.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    }
+
+    fun goToCurrent() {
+        _isMonthView.value = false
+        _startDate.value = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun loadMatrixData() {
         viewModelScope.launch {
-            val today = LocalDate.now()
-            
-            // Calculate current week (Monday to Sunday) - CRITICAL: Use MONDAY as week start
-            val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-            val weekEnd = weekStart.plusDays(6)
+            combine(_startDate, _includeImportedActivities, _isMonthView) { start, include, isMonthView -> Triple(start, include, isMonthView) }
+                .flatMapLatest { (start, includeImported, isMonthView) ->
+                    val numberOfWeeks = if (isMonthView) {
+                        val firstOfMonth = getReferenceMonth(start, true)
+                        val lastOfMonth = firstOfMonth.with(TemporalAdjusters.lastDayOfMonth())
+                        val daysBetween = ChronoUnit.DAYS.between(start, lastOfMonth) + 1
+                        ceil(daysBetween.toDouble() / 7.0).toInt()
+                    } else {
+                        4 // Standard rolling view
+                    }
+                    
+                    val end = start.plusWeeks(numberOfWeeks.toLong()).minusDays(1)
+                    combine(
+                        repository.getTrainingPlansByDateRange(start, end),
+                        repository.getWorkoutLogsByDateRange(start, end),
+                        repository.getSpecialPeriodsByDateRange(start, end)
+                    ) { plans, logs, specialPeriods ->
+                        val rows = (0 until numberOfWeeks).map { weekIndex ->
+                            val weekStart = start.plusWeeks(weekIndex.toLong())
+                            
+                            // Check if this week starts a new month or is the first week
+                            val monthLabel = if (weekIndex == 0 || weekStart.month != weekStart.minusWeeks(1).month) {
+                                weekStart.format(monthFormatter)
+                            } else null
 
-            // Generate list of days in the week
-            val daysOfWeek = (0..6).map { weekStart.plusDays(it.toLong()) }
+                            val daysOfWeek = (0 until 7).map { dayIndex ->
+                                val date = weekStart.plusDays(dayIndex.toLong())
+                                val dayPlans = plans.filter { it.date == date }
+                                val dayLogs = logs.filter { it.date == date }
+                                val daySpecialPeriods = specialPeriods.filter { 
+                                    (date >= it.startDate && date <= it.endDate)
+                                }
+                                
+                                WeekDay(
+                                    date = date,
+                                    dayName = date.format(dayNameFormatter),
+                                    workouts = dayPlans,
+                                    completedLogs = dayLogs,
+                                    specialPeriods = daySpecialPeriods,
+                                    isToday = date == LocalDate.now()
+                                )
+                            }
 
-            // Observe training plans for the week
-            repository.getTrainingPlansByDateRange(weekStart, weekEnd)
-                .map { plans ->
-                    daysOfWeek.map { date ->
-                        val dayName = date.format(dayNameFormatter)
-                        val dayWorkouts = plans.filter { it.date == date }
-                        WeekDay(
-                            date = date,
-                            dayName = dayName,
-                            workouts = dayWorkouts
+                            val weekPlans = plans.filter { it.date >= weekStart && it.date < weekStart.plusWeeks(1) }
+                            val weekLogs = logs.filter { it.date >= weekStart && it.date < weekStart.plusWeeks(1) }
+                            
+                            val filteredWeekLogs = if (includeImported) {
+                                weekLogs
+                            } else {
+                                weekLogs.filter { log ->
+                                    weekPlans.any { plan ->
+                                        plan.date == log.date && plan.type == log.type
+                                    }
+                                }
+                            }
+                            
+                            val plannedTSS = weekPlans.sumOf { it.plannedTSS.toLong() }.toInt()
+                            val actualTSS = filteredWeekLogs.sumOf { (it.computedTSS ?: 0).toLong() }.toInt()
+                            val totalDuration = filteredWeekLogs.sumOf { it.durationMinutes.toLong() }.toInt()
+                            
+                            val progress = if (plannedTSS > 0) {
+                                actualTSS.toFloat() / plannedTSS.toFloat()
+                            } else if (actualTSS > 0) 1f else 0f
+
+                            WeeklyRowState(
+                                weekStart = weekStart,
+                                days = daysOfWeek,
+                                plannedTSS = plannedTSS,
+                                actualTSS = actualTSS,
+                                totalDurationMinutes = totalDuration,
+                                tssCompletionProgress = progress.coerceIn(0f, 1f),
+                                monthLabel = monthLabel
+                            )
+                        }
+
+                        // Calculate warnings
+                        val weeklyRows = rows.mapIndexed { index, row ->
+                            val hasWarning = if (index > 0) {
+                                val prevPlannedTSS = rows[index - 1].plannedTSS
+                                if (prevPlannedTSS > 0) {
+                                    (row.plannedTSS.toFloat() / prevPlannedTSS.toFloat()) > 1.15f
+                                } else {
+                                    row.plannedTSS > 50
+                                }
+                            } else false
+                            row.copy(hasTssJumpWarning = hasWarning)
+                        }
+
+                        // Distribution
+                        val totalDuration = if (includeImported) {
+                            plans.sumOf { it.durationMinutes } + logs.sumOf { it.durationMinutes }
+                        } else {
+                            plans.sumOf { it.durationMinutes }
+                        }
+                        
+                        val distribution = if (totalDuration > 0) {
+                            val planDistribution = plans.groupBy { it.type }
+                                .mapValues { (_, workouts) ->
+                                    workouts.sumOf { it.durationMinutes }.toFloat() / totalDuration.toFloat()
+                                }
+                            
+                            if (includeImported) {
+                                val logDistribution = logs.groupBy { it.type }
+                                    .mapValues { (_, workoutLogs) ->
+                                        workoutLogs.sumOf { it.durationMinutes }.toFloat() / totalDuration.toFloat()
+                                    }
+                                
+                                (planDistribution.keys + logDistribution.keys).associateWith { type ->
+                                    (planDistribution[type] ?: 0f) + (logDistribution[type] ?: 0f)
+                                }
+                            } else {
+                                planDistribution
+                            }
+                        } else emptyMap()
+
+                        WeeklyPlannerUiState(
+                            weeklyRows = weeklyRows,
+                            startDate = start,
+                            disciplineDistribution = distribution,
+                            includeImportedActivities = includeImported,
+                            isMonthView = isMonthView
                         )
                     }
-                }
-                .collect { weekDays ->
-                    _uiState.value = _uiState.value.copy(weekDays = weekDays)
+                }.collect { newState ->
+                    _uiState.value = newState
                 }
         }
     }
@@ -87,5 +249,23 @@ class WeeklyPlannerViewModel @Inject constructor(
             closeBottomSheet()
         }
     }
-}
 
+    fun deleteWorkout(workout: TrainingPlan) {
+        viewModelScope.launch {
+            repository.deleteTrainingPlan(workout)
+        }
+    }
+
+    fun copyWeek(sourceWeekStart: LocalDate) {
+        viewModelScope.launch {
+            repository.copyWeek(
+                sourceStartDate = sourceWeekStart,
+                targetStartDate = sourceWeekStart.plusWeeks(1)
+            )
+        }
+    }
+
+    fun setIncludeImportedActivities(include: Boolean) {
+        _includeImportedActivities.value = include
+    }
+}

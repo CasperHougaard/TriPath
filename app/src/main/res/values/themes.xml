@@ -11,6 +11,21 @@
         
         <!-- Navigation bar -->
         <item name="android:navigationBarColor">@android:color/white</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+    
+    <style name="Theme.TriPath.Dark" parent="android:Theme.Material.NoActionBar">
+        <!-- Primary brand color -->
+        <item name="android:colorPrimary">#42A5F5</item>
+        <item name="android:colorPrimaryDark">#0D47A1</item>
+        <item name="android:colorAccent">#FF6B35</item>
+        
+        <!-- Status bar color -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        
+        <!-- Navigation bar - white for visibility in dark theme -->
+        <item name="android:navigationBarColor">@android:color/white</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>
 

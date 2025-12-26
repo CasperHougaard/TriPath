@@ -1,17 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Triathlon-inspired colors -->
-    <color name="tri_blue">#1565C0</color>
+    <!-- Triathlon-inspired colors (Design Guidelines) -->
+    <color name="tri_blue">#1565C0</color> <!-- Bike / Primary Light -->
     <color name="tri_dark_blue">#0D47A1</color>
-    <color name="tri_light_blue">#42A5F5</color>
-    <color name="tri_orange">#FF6F00</color>
-    <color name="tri_green">#2E7D32</color>
+    <color name="tri_light_blue">#42A5F5</color> <!-- Primary Dark -->
+    <color name="tri_electric_blue">#00B8FF</color> <!-- Swim -->
+    <color name="tri_safety_orange">#FF6B35</color> <!-- Run -->
+    <color name="tri_purple">#9C27B0</color> <!-- Strength -->
     
     <!-- Workout type colors -->
-    <color name="color_swim">#1565C0</color>
-    <color name="color_bike">#FF6F00</color>
-    <color name="color_run">#2E7D32</color>
-    <color name="color_strength">#7B1FA2</color>
+    <color name="color_swim">#00B8FF</color>
+    <color name="color_bike">#1565C0</color>
+    <color name="color_run">#FF6B35</color>
+    <color name="color_strength">#9C27B0</color>
     
     <!-- General colors -->
     <color name="black">#FF000000</color>

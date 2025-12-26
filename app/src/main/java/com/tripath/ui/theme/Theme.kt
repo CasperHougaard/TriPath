@@ -47,7 +47,7 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun TriPathTheme(
-    darkTheme: Boolean = true, // Force dark theme by default
+    darkTheme: Boolean = isSystemInDarkTheme(), // Respect system theme by default
     // Dynamic color disabled to use our high-contrast colors
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit

@@ -20,7 +20,7 @@ data class TrainingPlan(
     /** The scheduled date for the workout */
     val date: LocalDate,
     
-    /** Type of workout: RUN, BIKE, SWIM, or STRENGTH */
+    /** Type of workout: RUN, BIKE, SWIM, STRENGTH, or OTHER */
     val type: WorkoutType,
     
     /** Optional sub-type for more specific workout description (e.g., "Tempo Run", "Hill Repeats") */

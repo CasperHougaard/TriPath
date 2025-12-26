@@ -29,6 +29,9 @@ hiltNavigationCompose = "1.2.0"
 # Coroutines
 coroutines = "1.9.0"
 
+# DataStore
+datastore = "1.1.1"
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -68,6 +71,9 @@ hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-com
 
 # Coroutines
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+
+# DataStore
+androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

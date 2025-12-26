@@ -30,11 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
+import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import java.time.LocalDate
 
@@ -44,16 +44,17 @@ fun AddWorkoutBottomSheet(
     selectedDate: LocalDate,
     onDismiss: () -> Unit,
     onSave: (TrainingPlan) -> Unit,
+    initialWorkout: TrainingPlan? = null,
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var selectedType by remember { mutableStateOf<WorkoutType?>(null) }
-    var selectedFocus by remember { mutableStateOf<StrengthFocus?>(null) }
-    var selectedIntensity by remember { mutableStateOf<Intensity?>(null) }
-    var duration by remember { mutableIntStateOf(30) }
-    var plannedTSS by remember { mutableIntStateOf(50) }
-    var subType by remember { mutableStateOf("") }
+    var selectedType by remember { mutableStateOf<WorkoutType?>(initialWorkout?.type) }
+    var selectedFocus by remember { mutableStateOf<StrengthFocus?>(initialWorkout?.strengthFocus) }
+    var selectedIntensity by remember { mutableStateOf<Intensity?>(initialWorkout?.intensity) }
+    var duration by remember { mutableIntStateOf(initialWorkout?.durationMinutes ?: 30) }
+    var plannedTSS by remember { mutableIntStateOf(initialWorkout?.plannedTSS ?: 50) }
+    var subType by remember { mutableStateOf(initialWorkout?.subType ?: "") }
 
     // Update TSS when intensity changes for STRENGTH
     if (selectedType == WorkoutType.STRENGTH && selectedIntensity != null) {
@@ -72,11 +73,11 @@ fun AddWorkoutBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
             Text(
-                text = "Add Workout",
+                text = if (initialWorkout != null) "Edit Workout" else "Add Workout",
                 style = MaterialTheme.typography.titleLarge
             )
 
@@ -87,7 +88,7 @@ fun AddWorkoutBottomSheet(
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
                 WorkoutType.values().forEach { type ->
                     FilterChip(
@@ -114,7 +115,7 @@ fun AddWorkoutBottomSheet(
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                 ) {
                     StrengthFocus.values().forEach { focus ->
                         FilterChip(
@@ -141,7 +142,7 @@ fun AddWorkoutBottomSheet(
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                 ) {
                     Intensity.values().forEach { intensity ->
                         FilterChip(
@@ -215,7 +216,7 @@ fun AddWorkoutBottomSheet(
                 Text("Save")
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(Spacing.lg))
         }
     }
 }

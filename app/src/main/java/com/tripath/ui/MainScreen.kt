@@ -1,9 +1,12 @@
 package com.tripath.ui
 
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -68,6 +71,34 @@ fun MainScreen(
                     }
                 )
                 NavigationBarItem(
+                    icon = { Icon(Icons.Default.BarChart, contentDescription = "Stats") },
+                    label = { Text("Stats") },
+                    selected = currentDestination?.hierarchy?.any { it.route == Screen.Stats.route } == true,
+                    onClick = {
+                        navController.navigate(Screen.Stats.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.Person, contentDescription = "Coach") },
+                    label = { Text("Coach") },
+                    selected = currentDestination?.hierarchy?.any { it.route == Screen.Coach.route } == true,
+                    onClick = {
+                        navController.navigate(Screen.Coach.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+                NavigationBarItem(
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                     label = { Text("Settings") },
                     selected = currentDestination?.hierarchy?.any { it.route == Screen.Settings.route } == true,
@@ -87,7 +118,9 @@ fun MainScreen(
     ) { paddingValues ->
         TriPathNavigation(
             navController = navController,
-            modifier = Modifier.padding(paddingValues)
+            modifier = Modifier
+                .padding(paddingValues)
+                .consumeWindowInsets(paddingValues)
         )
     }
 }

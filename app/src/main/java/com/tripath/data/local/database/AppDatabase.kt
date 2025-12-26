@@ -6,33 +6,43 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.tripath.data.local.database.converters.Converters
+import com.tripath.data.local.database.dao.DayNoteDao
+import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
-import com.tripath.data.local.database.dao.UserProfileDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
+import com.tripath.data.local.database.entities.DayNote
+import com.tripath.data.local.database.entities.DayTemplate
+import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
-import com.tripath.data.local.database.entities.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
 
 /**
  * Main Room database for the TriPath application.
- * Contains all training plans, workout logs, and user profile data.
+ * Contains all training plans, workout logs, and special periods.
+ * Note: User Profile is stored in DataStore Preferences, not in Room.
+ * 
+ * Migrations are handled explicitly via Migration classes in the migrations package.
  */
 @Database(
     entities = [
         TrainingPlan::class,
         WorkoutLog::class,
-        UserProfile::class
+        SpecialPeriod::class,
+        DayNote::class,
+        DayTemplate::class
     ],
-    version = 1,
-    exportSchema = true,
-    autoMigrations = []
+    version = 7,
+    exportSchema = true
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun trainingPlanDao(): TrainingPlanDao
     abstract fun workoutLogDao(): WorkoutLogDao
-    abstract fun userProfileDao(): UserProfileDao
+    abstract fun specialPeriodDao(): SpecialPeriodDao
+    abstract fun dayNoteDao(): DayNoteDao
+    abstract fun dayTemplateDao(): DayTemplateDao
 
     companion object {
         const val DATABASE_NAME = "tripath_database"
@@ -50,9 +60,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     DATABASE_NAME
-                )
-                    .fallbackToDestructiveMigration()
-                    .build()
+                ).build()
                 INSTANCE = instance
                 instance
             }

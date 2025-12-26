@@ -1,12 +1,18 @@
 package com.tripath.data.local.backup
 
+import com.tripath.data.local.database.AppDatabase
+import com.tripath.data.local.database.entities.SpecialPeriod
+import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.local.database.entities.TrainingPlan
-import com.tripath.data.local.database.entities.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
+import com.tripath.data.model.UserProfile
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.room.withTransaction
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,7 +26,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class BackupManager @Inject constructor(
-    private val repository: TrainingRepository
+    private val repository: TrainingRepository,
+    private val database: AppDatabase
 ) {
     private val json = Json {
         prettyPrint = true
@@ -30,23 +37,26 @@ class BackupManager @Inject constructor(
 
     /**
      * Export all data to a JSON string.
-     * Includes training plans, workout logs, and user profile.
+     * Includes training plans, workout logs, special periods, and user profile.
      */
     suspend fun exportToJson(): String {
-        val trainingPlans = repository.getAllTrainingPlansOnce()
-        val workoutLogs = repository.getAllWorkoutLogsOnce()
-        val userProfile = repository.getUserProfileOnce()
+        return withContext(Dispatchers.IO) {
+            val trainingPlans = repository.getAllTrainingPlansOnce()
+            val workoutLogs = repository.getAllWorkoutLogsOnce()
+            val specialPeriods = repository.getAllSpecialPeriodsOnce()
+            val userProfile = repository.getUserProfileOnce()
 
-        val backupData = BackupData(
-            version = BACKUP_VERSION,
-            schemaVersion = 1,
-            exportedAt = System.currentTimeMillis(),
-            trainingPlans = trainingPlans.map { it.toDto() },
-            workoutLogs = workoutLogs.map { it.toDto() },
-            userProfile = userProfile?.toDto()
-        )
+            val backupData = AppBackupData(
+                version = BACKUP_VERSION,
+                timestamp = System.currentTimeMillis(),
+                trainingPlans = trainingPlans.map { it.toDto() },
+                workoutLogs = workoutLogs.map { it.toDto() },
+                specialPeriods = specialPeriods.map { it.toDto() },
+                userProfile = userProfile?.toDto()
+            )
 
-        return json.encodeToString(backupData)
+            json.encodeToString(backupData)
+        }
     }
 
     /**
@@ -57,43 +67,51 @@ class BackupManager @Inject constructor(
      * @return Result indicating success or failure with error details
      */
     suspend fun importFromJson(jsonString: String): Result<ImportSummary> {
-        return try {
-            val backupData = json.decodeFromString<BackupData>(jsonString)
+        return withContext(Dispatchers.IO) {
+            try {
+                val backupData = json.decodeFromString<AppBackupData>(jsonString)
 
-            // TODO: Handle migration logic if imported version < current version
-            
-            // Validate backup version
-            if (backupData.version > BACKUP_VERSION) {
-                return Result.failure(
-                    IllegalArgumentException("Backup version ${backupData.version} is newer than supported version $BACKUP_VERSION")
-                )
+                // Validate backup version
+                if (backupData.version > BACKUP_VERSION) {
+                    return@withContext Result.failure(
+                        IllegalArgumentException("Backup version ${backupData.version} is newer than supported version $BACKUP_VERSION")
+                    )
+                }
+
+                // Import all data in a transaction to ensure atomicity
+                val summary = database.withTransaction {
+                    // Clear all existing data
+                    repository.clearAllData()
+
+                    // Import training plans
+                    val trainingPlans = backupData.trainingPlans.map { it.toEntity() }
+                    repository.insertTrainingPlans(trainingPlans)
+
+                    // Import workout logs
+                    val workoutLogs = backupData.workoutLogs.map { it.toEntity() }
+                    repository.insertWorkoutLogs(workoutLogs)
+
+                    // Import special periods
+                    val specialPeriods = backupData.specialPeriods.map { it.toEntity() }
+                    repository.insertSpecialPeriods(specialPeriods)
+
+                    // Import user profile
+                    backupData.userProfile?.let { profileDto ->
+                        repository.upsertUserProfile(profileDto.toEntity())
+                    }
+
+                    ImportSummary(
+                        trainingPlansImported = trainingPlans.size,
+                        workoutLogsImported = workoutLogs.size,
+                        specialPeriodsImported = specialPeriods.size,
+                        profileImported = backupData.userProfile != null
+                    )
+                }
+                
+                Result.success(summary)
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-
-            // Clear all existing data
-            repository.clearAllData()
-
-            // Import training plans
-            val trainingPlans = backupData.trainingPlans.map { it.toEntity() }
-            repository.insertTrainingPlans(trainingPlans)
-
-            // Import workout logs
-            val workoutLogs = backupData.workoutLogs.map { it.toEntity() }
-            repository.insertWorkoutLogs(workoutLogs)
-
-            // Import user profile
-            backupData.userProfile?.let { profileDto ->
-                repository.upsertUserProfile(profileDto.toEntity())
-            }
-
-            Result.success(
-                ImportSummary(
-                    trainingPlansImported = trainingPlans.size,
-                    workoutLogsImported = workoutLogs.size,
-                    profileImported = backupData.userProfile != null
-                )
-            )
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
@@ -120,6 +138,7 @@ class BackupManager @Inject constructor(
 data class ImportSummary(
     val trainingPlansImported: Int,
     val workoutLogsImported: Int,
+    val specialPeriodsImported: Int,
     val profileImported: Boolean
 )
 
@@ -129,12 +148,12 @@ data class ImportSummary(
  * Root backup data structure.
  */
 @Serializable
-data class BackupData(
-    val version: Int,
-    val schemaVersion: Int = 1,
-    val exportedAt: Long,
+data class AppBackupData(
+    val version: Int = 1,
+    val timestamp: Long,
     val trainingPlans: List<TrainingPlanDto>,
     val workoutLogs: List<WorkoutLogDto>,
+    val specialPeriods: List<SpecialPeriodDto> = emptyList(),
     val userProfile: UserProfileDto?
 )
 
@@ -144,7 +163,8 @@ data class BackupData(
 @Serializable
 data class TrainingPlanDto(
     val id: String,
-    val dateEpochDay: Long,
+    @Serializable(with = LocalDateSerializer::class)
+    val date: LocalDate,
     val type: String,
     val subType: String?,
     val durationMinutes: Int,
@@ -159,22 +179,47 @@ data class TrainingPlanDto(
 @Serializable
 data class WorkoutLogDto(
     val connectId: String,
-    val dateEpochDay: Long,
+    @Serializable(with = LocalDateSerializer::class)
+    val date: LocalDate,
     val type: String,
     val durationMinutes: Int,
     val avgHeartRate: Int?,
     val calories: Int?,
-    val computedTSS: Int?
+    val computedTSS: Int?,
+    val distanceMeters: Double?,
+    val avgSpeedKmh: Double?,
+    val avgPowerWatts: Int?,
+    val steps: Int?
+)
+
+/**
+ * DTO for SpecialPeriod serialization.
+ */
+@Serializable
+data class SpecialPeriodDto(
+    val id: String,
+    val type: String,
+    @Serializable(with = LocalDateSerializer::class)
+    val startDate: LocalDate,
+    @Serializable(with = LocalDateSerializer::class)
+    val endDate: LocalDate,
+    val notes: String?
 )
 
 /**
  * DTO for UserProfile serialization.
+ * Note: `id` field is optional for backward compatibility with old backups.
  */
 @Serializable
 data class UserProfileDto(
-    val id: Int,
-    val ftp: Int?,
-    val goalDateEpochDay: Long?,
+    val id: Int? = null, // Optional for backward compatibility, ignored when converting to entity
+    val ftpBike: Int?,
+    val maxHeartRate: Int?,
+    val defaultSwimTSS: Int?,
+    val defaultStrengthHeavyTSS: Int?,
+    val defaultStrengthLightTSS: Int?,
+    @Serializable(with = LocalDateSerializer::class)
+    val goalDate: LocalDate?,
     val weeklyHoursGoal: Float?,
     val lthr: Int?,
     val cssSecondsper100m: Int?
@@ -182,9 +227,9 @@ data class UserProfileDto(
 
 // ==================== Entity <-> DTO Conversion Extensions ====================
 
-private fun TrainingPlan.toDto() = TrainingPlanDto(
+fun TrainingPlan.toDto() = TrainingPlanDto(
     id = id,
-    dateEpochDay = date.toEpochDay(),
+    date = date,
     type = type.name,
     subType = subType,
     durationMinutes = durationMinutes,
@@ -193,9 +238,9 @@ private fun TrainingPlan.toDto() = TrainingPlanDto(
     intensity = intensity?.name
 )
 
-private fun TrainingPlanDto.toEntity() = TrainingPlan(
+fun TrainingPlanDto.toEntity() = TrainingPlan(
     id = id,
-    date = LocalDate.ofEpochDay(dateEpochDay),
+    date = date,
     type = WorkoutType.valueOf(type),
     subType = subType,
     durationMinutes = durationMinutes,
@@ -206,37 +251,67 @@ private fun TrainingPlanDto.toEntity() = TrainingPlan(
 
 private fun WorkoutLog.toDto() = WorkoutLogDto(
     connectId = connectId,
-    dateEpochDay = date.toEpochDay(),
+    date = date,
     type = type.name,
     durationMinutes = durationMinutes,
     avgHeartRate = avgHeartRate,
     calories = calories,
-    computedTSS = computedTSS
+    computedTSS = computedTSS,
+    distanceMeters = distanceMeters,
+    avgSpeedKmh = avgSpeedKmh,
+    avgPowerWatts = avgPowerWatts,
+    steps = steps
 )
 
 private fun WorkoutLogDto.toEntity() = WorkoutLog(
     connectId = connectId,
-    date = LocalDate.ofEpochDay(dateEpochDay),
+    date = date,
     type = WorkoutType.valueOf(type),
     durationMinutes = durationMinutes,
     avgHeartRate = avgHeartRate,
     calories = calories,
-    computedTSS = computedTSS
+    computedTSS = computedTSS,
+    distanceMeters = distanceMeters,
+    avgSpeedKmh = avgSpeedKmh,
+    avgPowerWatts = avgPowerWatts,
+    steps = steps
+)
+
+private fun SpecialPeriod.toDto() = SpecialPeriodDto(
+    id = id,
+    type = type.name,
+    startDate = startDate,
+    endDate = endDate,
+    notes = notes
+)
+
+private fun SpecialPeriodDto.toEntity() = SpecialPeriod(
+    id = id,
+    type = SpecialPeriodType.valueOf(type),
+    startDate = startDate,
+    endDate = endDate,
+    notes = notes
 )
 
 private fun UserProfile.toDto() = UserProfileDto(
-    id = id,
-    ftp = ftp,
-    goalDateEpochDay = goalDate?.toEpochDay(),
+    ftpBike = ftpBike,
+    maxHeartRate = maxHeartRate,
+    defaultSwimTSS = defaultSwimTSS,
+    defaultStrengthHeavyTSS = defaultStrengthHeavyTSS,
+    defaultStrengthLightTSS = defaultStrengthLightTSS,
+    goalDate = goalDate,
     weeklyHoursGoal = weeklyHoursGoal,
     lthr = lthr,
     cssSecondsper100m = cssSecondsper100m
 )
 
 private fun UserProfileDto.toEntity() = UserProfile(
-    id = id,
-    ftp = ftp,
-    goalDate = goalDateEpochDay?.let { LocalDate.ofEpochDay(it) },
+    ftpBike = ftpBike,
+    maxHeartRate = maxHeartRate,
+    defaultSwimTSS = defaultSwimTSS,
+    defaultStrengthHeavyTSS = defaultStrengthHeavyTSS,
+    defaultStrengthLightTSS = defaultStrengthLightTSS,
+    goalDate = goalDate,
     weeklyHoursGoal = weeklyHoursGoal,
     lthr = lthr,
     cssSecondsper100m = cssSecondsper100m

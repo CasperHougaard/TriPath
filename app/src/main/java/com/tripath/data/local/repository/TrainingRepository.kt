@@ -1,8 +1,11 @@
 package com.tripath.data.local.repository
 
+import com.tripath.data.local.database.entities.DayNote
+import com.tripath.data.local.database.entities.DayTemplate
+import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
-import com.tripath.data.local.database.entities.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
+import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
@@ -64,6 +67,11 @@ interface TrainingRepository {
      * Delete all training plans.
      */
     suspend fun deleteAllTrainingPlans()
+
+    /**
+     * Copy all training plans from source week to target week.
+     */
+    suspend fun copyWeek(sourceStartDate: LocalDate, targetStartDate: LocalDate)
 
     // ==================== Workout Log Operations ====================
 
@@ -145,5 +153,49 @@ interface TrainingRepository {
      * Delete all data from all tables.
      */
     suspend fun clearAllData()
+
+    // ==================== Special Period Operations ====================
+
+    fun getAllSpecialPeriods(): Flow<List<SpecialPeriod>>
+
+    /**
+     * Get all special periods as a one-shot list (for backup).
+     */
+    suspend fun getAllSpecialPeriodsOnce(): List<SpecialPeriod>
+    
+    fun getActiveSpecialPeriods(date: LocalDate): Flow<List<SpecialPeriod>>
+
+    fun getSpecialPeriodsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<SpecialPeriod>>
+    
+    suspend fun insertSpecialPeriod(specialPeriod: SpecialPeriod)
+
+    /**
+     * Insert multiple special periods.
+     */
+    suspend fun insertSpecialPeriods(periods: List<SpecialPeriod>)
+    
+    suspend fun deleteSpecialPeriod(id: String)
+
+    // ==================== Day Note Operations ====================
+
+    fun getDayNote(date: LocalDate): Flow<DayNote?>
+
+    suspend fun getDayNoteOnce(date: LocalDate): DayNote?
+
+    suspend fun insertDayNote(dayNote: DayNote)
+
+    suspend fun updateDayNote(dayNote: DayNote)
+
+    suspend fun deleteDayNote(dayNote: DayNote)
+
+    // ==================== Day Template Operations ====================
+
+    fun getAllDayTemplates(): Flow<List<DayTemplate>>
+
+    suspend fun getDayTemplateById(id: String): DayTemplate?
+
+    suspend fun insertDayTemplate(template: DayTemplate)
+
+    suspend fun deleteDayTemplate(template: DayTemplate)
 }
 

@@ -15,8 +15,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.tripath.ui.theme.TriPathTheme
 
 /**
@@ -26,6 +28,12 @@ import com.tripath.ui.theme.TriPathTheme
 class HealthConnectPrivacyPolicyActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Set navigation bar to white for visibility in dark theme
+        window.navigationBarColor = android.graphics.Color.WHITE
+        val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
+        windowInsetsController.isAppearanceLightNavigationBars = true
+        
         setContent {
             TriPathTheme {
                 Surface(

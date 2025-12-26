@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "7efd46c27310c95f1067dc480a1de0ab",
+    "identityHash": "98a0fade35def5d81a4d42ce5ec76c5a",
     "entities": [
       {
         "tableName": "training_plans",
@@ -68,7 +68,7 @@
       },
       {
         "tableName": "workout_logs",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`connectId` TEXT NOT NULL, `date` INTEGER NOT NULL, `type` TEXT NOT NULL, `durationMinutes` INTEGER NOT NULL, `avgHeartRate` INTEGER, `calories` INTEGER, `computedTSS` INTEGER, PRIMARY KEY(`connectId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`connectId` TEXT NOT NULL, `date` INTEGER NOT NULL, `type` TEXT NOT NULL, `durationMinutes` INTEGER NOT NULL, `avgHeartRate` INTEGER, `calories` INTEGER, `computedTSS` INTEGER, `distanceMeters` REAL, `avgSpeedKmh` REAL, `avgPowerWatts` INTEGER, `steps` INTEGER, PRIMARY KEY(`connectId`))",
         "fields": [
           {
             "fieldPath": "connectId",
@@ -111,6 +111,30 @@
             "columnName": "computedTSS",
             "affinity": "INTEGER",
             "notNull": false
+          },
+          {
+            "fieldPath": "distanceMeters",
+            "columnName": "distanceMeters",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "avgSpeedKmh",
+            "columnName": "avgSpeedKmh",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "avgPowerWatts",
+            "columnName": "avgPowerWatts",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "steps",
+            "columnName": "steps",
+            "affinity": "INTEGER",
+            "notNull": false
           }
         ],
         "primaryKey": {
@@ -124,7 +148,7 @@
       },
       {
         "tableName": "user_profile",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `ftp` INTEGER, `goalDate` INTEGER, `weeklyHoursGoal` REAL, `lthr` INTEGER, `cssSecondsper100m` INTEGER, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `ftpBike` INTEGER, `maxHeartRate` INTEGER, `defaultSwimTSS` INTEGER, `defaultStrengthHeavyTSS` INTEGER, `defaultStrengthLightTSS` INTEGER, `goalDate` INTEGER, `weeklyHoursGoal` REAL, `lthr` INTEGER, `cssSecondsper100m` INTEGER, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -133,8 +157,32 @@
             "notNull": true
           },
           {
-            "fieldPath": "ftp",
-            "columnName": "ftp",
+            "fieldPath": "ftpBike",
+            "columnName": "ftpBike",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "maxHeartRate",
+            "columnName": "maxHeartRate",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "defaultSwimTSS",
+            "columnName": "defaultSwimTSS",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "defaultStrengthHeavyTSS",
+            "columnName": "defaultStrengthHeavyTSS",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "defaultStrengthLightTSS",
+            "columnName": "defaultStrengthLightTSS",
             "affinity": "INTEGER",
             "notNull": false
           },
@@ -176,7 +224,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7efd46c27310c95f1067dc480a1de0ab')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '98a0fade35def5d81a4d42ce5ec76c5a')"
     ]
   }
 }

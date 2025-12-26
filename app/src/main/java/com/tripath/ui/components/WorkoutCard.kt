@@ -9,7 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DirectionsRun
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.Pool
@@ -23,18 +24,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
+import com.tripath.ui.theme.IconSize
+import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import com.tripath.ui.theme.toColor
 
 @Composable
 fun WorkoutCard(
     workout: TrainingPlan,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     val workoutColor = workout.type.toColor()
     val icon = getWorkoutIcon(workout.type)
@@ -43,25 +46,26 @@ fun WorkoutCard(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
-        )
+        ),
+        onClick = onClick ?: {}
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(Spacing.lg),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = workout.type.name,
                 tint = workoutColor,
-                modifier = Modifier.size(32.dp)
+                modifier = Modifier.size(IconSize.large)
             )
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
             ) {
                 Text(
                     text = workout.type.name,
@@ -90,7 +94,7 @@ fun WorkoutCard(
                 }
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.lg)
                 ) {
                     Text(
                         text = "${workout.durationMinutes} min",
@@ -110,10 +114,11 @@ fun WorkoutCard(
 
 private fun getWorkoutIcon(type: WorkoutType): ImageVector {
     return when (type) {
-        WorkoutType.RUN -> Icons.Default.DirectionsRun
+        WorkoutType.RUN -> Icons.AutoMirrored.Filled.DirectionsRun
         WorkoutType.BIKE -> Icons.Default.PedalBike
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
+        WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
     }
 }
 
@@ -137,8 +142,8 @@ private fun formatIntensity(intensity: Intensity): String {
 fun WorkoutCardPreview() {
     TriPathTheme {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             WorkoutCard(
                 workout = TrainingPlan(
@@ -150,7 +155,7 @@ fun WorkoutCardPreview() {
                     intensity = Intensity.HEAVY
                 )
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(Spacing.sm))
             WorkoutCard(
                 workout = TrainingPlan(
                     date = java.time.LocalDate.now(),

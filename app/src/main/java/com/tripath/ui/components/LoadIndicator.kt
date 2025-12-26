@@ -14,7 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.dp
+import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 
 @Composable
@@ -33,8 +33,8 @@ fun LoadIndicator(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Text(
                 text = "Weekly Load Progress",
@@ -84,8 +84,8 @@ fun LoadIndicator(
 fun LoadIndicatorPreview() {
     TriPathTheme {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
             LoadIndicator(
                 plannedTSS = 300,

@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_SPEED" />
+    <uses-permission android:name="android.permission.health.READ_POWER" />
 
     <application
         android:name=".TriPathApplication"
@@ -27,6 +29,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.TriPath">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -38,7 +41,8 @@
         <!-- Required for Health Connect integration -->
         <activity
             android:name=".HealthConnectPrivacyPolicyActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>

@@ -1,0 +1,63 @@
+Her er en optimeret og mere professionel udgave af dine Cursor Rules. Jeg har struktureret dem, så de er lettere for AI'en at scanne (ved hjælp af Markdown-hierarki) og tilføjet vigtige detaljer om din off-season styrketrænings-logik og backup-strategi, som vi har diskuteret.
+
+TriPath Project Rules & Architecture Guidelines
+1. Data & Persistence (Room)
+Schema Changes: When modifying any @Entity, DAO, or database schema, MUST increment version in AppDatabase.kt.
+
+Migration Strategy: Currently uses fallbackToDestructiveMigration(). Be aware that incrementing version will wipe all local data.
+
+Type Converters: Ensure WorkoutType and Date objects have proper converters for Room.
+
+Location: app/src/main/java/com/tripath/data/local/database/
+
+2. Health Connect Integration
+Safety First: All Health Connect API calls MUST be wrapped in try-catch blocks.
+
+Availability Check: Always call isAvailable() before accessing HealthConnectClient.
+
+Null Safety: HealthConnectClient is nullable; perform null-checks before every operation.
+
+Data Mapping: Exercise records from Health Connect must be mapped via mapExerciseType() to: RUN, BIKE, SWIM, STRENGTH, or OTHER.
+
+Location: app/src/main/java/com/tripath/data/local/healthconnect/
+
+3. Training Logic (The Engine)
+TSS Calculation: Use TrainingMetricsCalculator for all stress score logic.
+
+Strength Training (Off-Season Focus):
+
+Rest periods follow science-based hypertrophy rules (e.g., 48h between heavy sessions).
+
+Default TSS for Strength: Light = 30, Heavy = 60.
+
+Activity Classification: Walking and Hiking MUST be mapped to WorkoutType.OTHER to avoid polluting Running Pace statistics.
+
+4. Dependency Injection (Hilt)
+Setup: Use @HiltAndroidApp in Application class and @AndroidEntryPoint in Activities.
+
+Modules: Provide Database and DAOs via DatabaseModule.kt (Singleton scope).
+
+ViewModels: Always use @HiltViewModel and constructor injection.
+
+5. UI & Architecture
+Pattern: Clean Architecture with MVVM + Jetpack Compose.
+
+State: Use StateFlow in ViewModels and collectAsStateWithLifecycle() in Composables.
+
+Theme: Force Dark Mode as default. Use WorkoutType.toColor() for consistent discipline-specific coloring.
+
+Navigation: Use Type-safe Compose Navigation.
+
+6. Backup & Reliability
+Backup: Use BackupManager for JSON export/import.
+
+Data Integrity: JSON backups include a schemaVersion to handle future data migrations.
+
+Reset: Provide a clear path to wipe local database via Settings for debugging/re-syncing.
+
+7. Technical Specifications
+SDKs: Min SDK 33, Target SDK 35.
+
+Concurrency: Use Coroutines (Dispatchers.IO for DB/Disk, Dispatchers.Main for UI).
+
+Validation: All user inputs (TSS, FTP, etc.) must be validated for positive integers.

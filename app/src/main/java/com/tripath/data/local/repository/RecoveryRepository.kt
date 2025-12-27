@@ -39,6 +39,11 @@ interface RecoveryRepository {
     fun getWellnessLogsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<DailyWellnessLog>>
 
     /**
+     * Get the most recent recorded weight before the given date.
+     */
+    suspend fun getLastRecordedWeight(currentDate: LocalDate): Double?
+
+    /**
      * Insert or update a daily wellness log.
      */
     suspend fun insertWellnessLog(log: DailyWellnessLog)

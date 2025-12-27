@@ -1,7 +1,7 @@
 # TriPath Development Status Log
 
-**Last Updated:** December 26, 2025  
-**Database Version:** 5  
+**Last Updated:** January 2025  
+**Database Version:** 11  
 **Min SDK:** 33 | **Target SDK:** 35
 
 ---
@@ -32,12 +32,18 @@
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| Room Database | ✅ | Version 5, 3 entities with auto-migrations |
+| Room Database | ✅ | Version 11, 8 entities with explicit migrations |
 | `TrainingPlan` entity | ✅ | Planned workouts with TSS, duration, type, strength focus |
 | `WorkoutLog` entity | ✅ | Synced workouts with HR, distance, speed, power, steps |
 | `UserProfile` entity | ✅ | FTP, max HR, LTHR, CSS (Stored in DataStore) |
 | `SpecialPeriod` entity | ✅ | Tracks injury, holiday, and recovery weeks |
-| Repository Pattern | ✅ | `TrainingRepository` with Coroutines and Flows |
+| `DayNote` entity | ✅ | Daily notes for training days |
+| `DayTemplate` entity | ✅ | Reusable day templates with JSON-serialized activities |
+| `RawWorkoutData` entity | ✅ | Raw Health Connect data for permanent storage and reprocessing |
+| `SleepLog` entity | ✅ | Sleep sessions synced from Health Connect with stages |
+| `DailyWellnessLog` entity | ✅ | Daily wellness metrics (soreness, mood, allergies, weight) |
+| `WellnessTaskDefinition` entity | ✅ | Recovery protocol task definitions with triggers |
+| Repository Pattern | ✅ | `TrainingRepository` and `RecoveryRepository` with Coroutines and Flows |
 | Hilt DI | ✅ | Centralized dependency management |
 
 ### 2. Health Connect Integration (100% Complete)
@@ -62,7 +68,7 @@
 | Duration-based TSS | ✅ | Configurable defaults for swim/strength |
 | Workout classification | ✅ | Walking/hiking → OTHER to avoid data pollution |
 
-### 4. UI Screens (85% Complete)
+### 4. UI Screens (100% Complete)
 
 | Screen | Status | Features |
 |--------|--------|----------|
@@ -71,8 +77,14 @@
 | **Statistics** | ✅ | Period selector, TSS trend chart, volume chart, discipline breakdown, key metrics |
 | **Progress (CTL/ATL)** | ✅ | CTL/ATL/TSB trends, Form status visualization, 90-day history |
 | **Coach** | ✅ | AI-driven assessment, phase timeline, manual interventions (Injury/Holiday/Recovery) |
+| **Recovery** | ✅ | Daily wellness logging, nutrition targets, recovery tasks, coach advice |
+| **Recovery History** | ✅ | Historical wellness data visualization with trends and correlations |
 | **Settings** | ✅ | User profile editing, Health Connect sync, backup/restore, theme toggle |
 | **Workout Detail** | ✅ | Detailed metrics for planned and completed workouts, HR analysis, TSS delta |
+| **Day Detail** | ✅ | Comprehensive day view with workouts, notes, and wellness data |
+| **Synced Exercises** | ✅ | Health Connect exercise import history and management |
+| **Exercise Import Detail** | ✅ | Detailed view of imported exercise data |
+| **Profile Editor** | ✅ | User profile editing (FTP, HR zones, CSS) |
 
 ### 5. UI Components (100% Complete)
 
@@ -100,7 +112,17 @@
 | Dark Theme | ✅ | Default, high-contrast for outdoor use |
 | Light Theme | ✅ | Available via toggle |
 
-### 7. Backup & Restore (100% Complete)
+### 7. Recovery Hub (100% Complete)
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| Daily Wellness Logging | ✅ | Soreness, mood, allergy severity, morning weight tracking |
+| Nutrition Targets | ✅ | Dynamic protein/fat/carb recommendations based on weight and TSS |
+| Recovery Tasks | ✅ | Context-aware task generation with trigger-based filtering |
+| Coach Advice | ✅ | Intelligent recommendations based on wellness data |
+| Recovery History | ✅ | Historical wellness trends and data visualization |
+
+### 8. Backup & Restore (100% Complete)
 
 | Feature | Status | Details |
 |---------|--------|---------|
@@ -109,7 +131,7 @@
 | Schema versioning | ✅ | `BACKUP_VERSION = 1` |
 | Clear all data | ✅ | Full database reset capability |
 
-### 8. Preferences (100% Complete)
+### 9. Preferences (100% Complete)
 
 | Preference | Status | Details |
 |------------|--------|---------|
@@ -140,8 +162,8 @@
 - [ ] Profile setup on first launch
 
 ### 3. Polish & UX
-- [ ] Proper database migrations (currently auto/destructive in some cases)
-- [ ] Recurring workout templates
+- [x] Proper database migrations (explicit migrations for all version transitions)
+- [ ] Recurring workout templates (DayTemplate entity exists, UI pending)
 - [ ] Notifications for key milestones
 
 ---
@@ -185,22 +207,26 @@ com.tripath/
 ├── data/
 │   ├── local/
 │   │   ├── backup/         → BackupManager, LocalDateSerializer
-│   │   ├── database/       → AppDatabase, DAOs, Entities, Converters
+│   │   ├── database/       → AppDatabase (v11), DAOs, Entities, Converters, Migrations
 │   │   ├── healthconnect/  → HealthConnectManager
 │   │   ├── preferences/    → PreferencesManager (DataStore)
-│   │   └── repository/     → TrainingRepository interface + impl
-│   └── model/              → WorkoutType, Intensity, StrengthFocus enums
+│   │   └── repository/     → TrainingRepository, RecoveryRepository interfaces + impls
+│   └── model/              → WorkoutType, Intensity, StrengthFocus, RecoveryEnums
 ├── di/                     → Hilt modules (DatabaseModule, RepositoryModule)
-├── domain/                 → TrainingMetricsCalculator
+├── domain/                 → TrainingMetricsCalculator, RecoveryEngine
 ├── ui/
 │   ├── components/         → Reusable UI components
-│   ├── dashboard/          → Dashboard screen + ViewModel
-│   ├── navigation/         → NavHost setup
-│   ├── planner/            → Weekly planner screen + ViewModel
-│   ├── settings/           → Settings screen + ViewModel
-│   ├── showcase/           → Design showcase (dev only)
-│   ├── stats/              → Statistics screen + ViewModel + components
-│   └── theme/              → Colors, Typography, Spacing
+│   ├── coach/               → Coach screen + ViewModel
+│   ├── dashboard/           → Dashboard screen + ViewModel
+│   ├── daydetail/           → Day detail screen + ViewModel
+│   ├── navigation/          → NavHost setup, Screen definitions
+│   ├── planner/             → Weekly planner screen + ViewModel
+│   ├── progress/            → Progress (CTL/ATL) screen + ViewModel
+│   ├── recovery/            → Recovery and RecoveryHistory screens + ViewModel
+│   ├── settings/            → Settings, ProfileEditor, HealthConnect screens + ViewModels
+│   ├── showcase/            → Design showcase (dev only)
+│   ├── stats/               → Statistics screen + ViewModel + components
+│   └── theme/                → Colors, Typography, Spacing
 ├── MainActivity.kt
 ├── TriPathApplication.kt   → @HiltAndroidApp
 └── HealthConnectPrivacyPolicyActivity.kt
@@ -221,11 +247,12 @@ com.tripath/
 
 ## 📈 Metrics (Code Stats)
 
-- **Kotlin Source Files:** 55
-- **UI Components:** 8 reusable, 8 screen-specific
-- **Database Entities:** 3
-- **ViewModels:** 4
+- **Kotlin Source Files:** ~80+
+- **UI Components:** 8+ reusable, 12+ screen-specific
+- **Database Entities:** 8 (TrainingPlan, WorkoutLog, SpecialPeriod, DayNote, DayTemplate, RawWorkoutData, SleepLog, DailyWellnessLog, WellnessTaskDefinition)
+- **ViewModels:** 8+ (Dashboard, Planner, Stats, Coach, Recovery, Progress, Settings, DayDetail)
 - **Health Connect Permissions:** 7
+- **Database Version:** 11
 
 ---
 
@@ -243,6 +270,10 @@ For a releasable MVP, complete:
 - [x] Coach assessment engine
 - [x] Workout details with HR analysis
 - [x] Proper database migrations (non-destructive production-ready)
+- [x] Recovery Hub with wellness tracking
+- [x] Recovery History visualization
+- [x] Sleep data integration from Health Connect
+- [x] Raw workout data storage for reprocessing
 
 ---
 

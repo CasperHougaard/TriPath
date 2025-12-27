@@ -660,6 +660,28 @@ FilterChip(
 )
 ```
 
+### Segmented Buttons (Time Range Selectors)
+```kotlin
+@OptIn(ExperimentalMaterial3Api::class)
+SingleChoiceSegmentedButtonRow(
+    modifier = Modifier.fillMaxWidth()
+) {
+    options.forEachIndexed { index, option ->
+        SegmentedButton(
+            selected = selectedOption == option,
+            onClick = { onSelect(option) },
+            shape = SegmentedButtonDefaults.itemShape(
+                index = index,
+                count = options.size
+            ),
+            label = { Text(option.displayName) }
+        )
+    }
+}
+```
+
+**Usage:** Time range selection (Week, Month, 3 Months, etc.) in Recovery History and Statistics screens.
+
 ## Charts and Data Visualization
 
 ### Chart Colors
@@ -695,6 +717,25 @@ Card(
     }
 }
 ```
+
+### Custom Chart Components
+
+TriPath includes custom chart components for specialized visualizations:
+
+#### LineChart
+- **Location:** `app/src/main/java/com/tripath/ui/components/charts/LineChart.kt`
+- **Usage:** TSS trends, CTL/ATL progress, wellness metrics over time
+- **Features:** Multiple series support, customizable colors, date axis
+
+#### ZoneDistributionChart
+- **Location:** `app/src/main/java/com/tripath/ui/components/charts/ZoneDistributionChart.kt`
+- **Usage:** Heart rate zone distribution, power zone analysis
+- **Features:** Pie/bar chart visualization, sport color integration
+
+#### Canvas-Based Charts (Recovery History)
+- **Usage:** Custom dual-axis charts, readiness vs load visualization
+- **Pattern:** Direct Canvas drawing for maximum flexibility
+- **Best Practice:** Use `rememberTextMeasurer()` for text rendering, maintain consistent stroke widths and colors
 
 ## Empty States
 

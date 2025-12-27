@@ -40,6 +40,7 @@ class PreferencesManager @Inject constructor(
     companion object {
         private val DARK_THEME_KEY = booleanPreferencesKey("dark_theme")
         private val SYNC_DAYS_KEY = intPreferencesKey("sync_days_back")
+        private val INCLUDE_IMPORTED_ACTIVITIES_KEY = booleanPreferencesKey("include_imported_activities")
         
         // UserProfile keys
         private val FTP_BIKE_KEY = intPreferencesKey("ftp_bike")
@@ -104,6 +105,24 @@ class PreferencesManager @Inject constructor(
     suspend fun setSyncDays(days: Int) {
         dataStore.edit { preferences ->
             preferences[SYNC_DAYS_KEY] = days
+        }
+    }
+
+    /**
+     * Flow that emits the current include imported activities preference for the planner.
+     * Default is false (planned only).
+     */
+    val includeImportedActivitiesFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[INCLUDE_IMPORTED_ACTIVITIES_KEY] ?: false // Default to planned only
+    }
+
+    /**
+     * Set the include imported activities preference for the planner.
+     * @param include true to include imported activities, false for planned only
+     */
+    suspend fun setIncludeImportedActivities(include: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[INCLUDE_IMPORTED_ACTIVITIES_KEY] = include
         }
     }
 

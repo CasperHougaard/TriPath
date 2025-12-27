@@ -41,6 +41,11 @@ class RecoveryRepositoryImpl @Inject constructor(
     ): Flow<List<DailyWellnessLog>> =
         wellnessDao.getLogsByDateRange(startDate, endDate)
 
+    override suspend fun getLastRecordedWeight(currentDate: LocalDate): Double? =
+        withContext(Dispatchers.IO) {
+            wellnessDao.getLastRecordedWeight(currentDate)
+        }
+
     override suspend fun insertWellnessLog(log: DailyWellnessLog) =
         withContext(Dispatchers.IO) {
             wellnessDao.insertLog(log)

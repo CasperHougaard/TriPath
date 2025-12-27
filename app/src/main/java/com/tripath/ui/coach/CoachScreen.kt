@@ -66,6 +66,7 @@ fun CoachScreen(
     var showSpecialPeriodDialog by remember { mutableStateOf(false) }
     var initialDialogType by remember { mutableStateOf(SpecialPeriodType.INJURY) }
     var clearExisting by remember { mutableStateOf(false) }
+    var allowMultipleActivitiesPerDay by remember { mutableStateOf(false) }
 
     Scaffold(modifier = modifier) { paddingValues ->
         if (uiState.isLoading) {
@@ -131,9 +132,23 @@ fun CoachScreen(
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Checkbox(
+                                checked = allowMultipleActivitiesPerDay,
+                                onCheckedChange = { allowMultipleActivitiesPerDay = it }
+                            )
+                            Text(
+                                text = "Allow multiple activities per day",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
 
                         Button(
-                            onClick = { viewModel.generateTrainingBlock(clearExisting) },
+                            onClick = { viewModel.generateTrainingBlock(clearExisting, allowMultipleActivitiesPerDay) },
                             enabled = !uiState.isGenerating,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(

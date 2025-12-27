@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
+import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,7 +53,8 @@ data class WeeklyPlannerUiState(
 
 @HiltViewModel
 class WeeklyPlannerViewModel @Inject constructor(
-    private val repository: TrainingRepository
+    private val repository: TrainingRepository,
+    private val preferencesManager: PreferencesManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WeeklyPlannerUiState())
@@ -71,6 +73,15 @@ class WeeklyPlannerViewModel @Inject constructor(
     init {
         loadMatrixData()
         observeUserProfile()
+        loadIncludeImportedPreference()
+    }
+
+    private fun loadIncludeImportedPreference() {
+        viewModelScope.launch {
+            preferencesManager.includeImportedActivitiesFlow.collect { include ->
+                _includeImportedActivities.value = include
+            }
+        }
     }
 
     private fun observeUserProfile() {
@@ -289,6 +300,9 @@ class WeeklyPlannerViewModel @Inject constructor(
     }
 
     fun setIncludeImportedActivities(include: Boolean) {
-        _includeImportedActivities.value = include
+        viewModelScope.launch {
+            preferencesManager.setIncludeImportedActivities(include)
+            _includeImportedActivities.value = include
+        }
     }
 }

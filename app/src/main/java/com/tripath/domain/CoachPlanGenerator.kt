@@ -25,7 +25,8 @@ class CoachPlanGenerator @Inject constructor(
     suspend fun generateBlock(
         startDate: LocalDate, 
         currentCtl: Double, 
-        ignoreExisting: Boolean = false
+        ignoreExisting: Boolean = false,
+        allowMultipleActivitiesPerDay: Boolean = false
     ): List<TrainingPlan> {
         val userProfile = repository.getUserProfileOnce() ?: return emptyList()
         val generatedPlans = mutableListOf<TrainingPlan>()
@@ -53,7 +54,8 @@ class CoachPlanGenerator @Inject constructor(
                 userProfile = userProfile,
                 phase = phase,
                 isRecoveryWeek = (i == 3),
-                ignoreExisting = ignoreExisting
+                ignoreExisting = ignoreExisting,
+                allowMultipleActivitiesPerDay = allowMultipleActivitiesPerDay
             )
             generatedPlans.addAll(weekPlans)
         }
@@ -67,7 +69,8 @@ class CoachPlanGenerator @Inject constructor(
         userProfile: UserProfile,
         phase: TrainingPhase,
         isRecoveryWeek: Boolean,
-        ignoreExisting: Boolean
+        ignoreExisting: Boolean,
+        allowMultipleActivitiesPerDay: Boolean
     ): List<TrainingPlan> {
         val newPlans = mutableListOf<TrainingPlan>()
         val weekEndDate = weekStartDate.plusDays(6)
@@ -90,7 +93,7 @@ class CoachPlanGenerator @Inject constructor(
             if (existingPlans.none { it.type == type }) {
                 val minTss = if (isRecoveryWeek) 20 else 35
                 val added = scheduleSpecificSession(
-                    type, minTss, "Maintenance", weekStartDate, availability, dailyPlans, newPlans, phase, Intensity.LOW
+                    type, minTss, "Maintenance", weekStartDate, availability, dailyPlans, newPlans, phase, Intensity.LOW, allowMultipleActivitiesPerDay
                 )
                 currentTss += added
             }
@@ -98,17 +101,17 @@ class CoachPlanGenerator @Inject constructor(
 
         // --- 2. STRENGTH (Priority 1) ---
         val strengthCount = if (isRecoveryWeek) 1 else (userProfile.strengthDays ?: 2)
-        currentTss += scheduleStrength(weekStartDate, strengthCount, availability, dailyPlans, newPlans, userProfile)
+        currentTss += scheduleStrength(weekStartDate, strengthCount, availability, dailyPlans, newPlans, userProfile, allowMultipleActivitiesPerDay)
 
         // --- 3. LONG RIDE (Priority 2) ---
         if (currentTss < targetTss) {
-            currentTss += scheduleLongRide(weekStartDate, longDay, availability, dailyPlans, newPlans, targetTss, isRecoveryWeek, phase)
+            currentTss += scheduleLongRide(weekStartDate, longDay, availability, dailyPlans, newPlans, targetTss, isRecoveryWeek, phase, allowMultipleActivitiesPerDay)
         }
 
         // --- 4. BALANCE-BASED FILLERS (Priority 3) ---
         val remainingTss = (targetTss - currentTss).coerceAtLeast(0)
         if (remainingTss > 30) {
-            scheduleSmartFillers(weekStartDate, remainingTss, availability, dailyPlans, newPlans, userProfile, phase, balance)
+            scheduleSmartFillers(weekStartDate, remainingTss, availability, dailyPlans, newPlans, userProfile, phase, balance, allowMultipleActivitiesPerDay)
         }
 
         return newPlans
@@ -123,12 +126,19 @@ class CoachPlanGenerator @Inject constructor(
         existing: Map<LocalDate, List<TrainingPlan>>,
         newPlans: MutableList<TrainingPlan>,
         phase: TrainingPhase,
-        intensity: Intensity
+        intensity: Intensity,
+        allowMultipleActivitiesPerDay: Boolean
     ): Int {
         val slot = (0..6).map { weekStartDate.plusDays(it.toLong()) }
             .firstOrNull { date ->
                 val allowed = availability[date.dayOfWeek]?.contains(type) == true
-                val free = existing[date].isNullOrEmpty() && newPlans.none { it.date == date }
+                val free = if (allowMultipleActivitiesPerDay) {
+                    // If multiple activities allowed, just check if the type is available on that day
+                    true
+                } else {
+                    // Otherwise, check if the day is completely free
+                    existing[date].isNullOrEmpty() && newPlans.none { it.date == date }
+                }
                 allowed && free
             } ?: return 0
 
@@ -156,7 +166,8 @@ class CoachPlanGenerator @Inject constructor(
         availability: Map<DayOfWeek, List<WorkoutType>>,
         existing: Map<LocalDate, List<TrainingPlan>>,
         newPlans: MutableList<TrainingPlan>,
-        userProfile: UserProfile
+        userProfile: UserProfile,
+        allowMultipleActivitiesPerDay: Boolean
     ): Int {
         var addedTss = 0
         var scheduledCount = 0
@@ -164,8 +175,13 @@ class CoachPlanGenerator @Inject constructor(
         
         val suitableDays = (0..6).map { weekStartDate.plusDays(it.toLong()) }
             .filter { date ->
-                availability[date.dayOfWeek]?.contains(WorkoutType.STRENGTH) == true &&
-                existing[date].isNullOrEmpty() && newPlans.none { it.date == date }
+                val allowed = availability[date.dayOfWeek]?.contains(WorkoutType.STRENGTH) == true
+                val free = if (allowMultipleActivitiesPerDay) {
+                    true // Type is available, day is fine
+                } else {
+                    existing[date].isNullOrEmpty() && newPlans.none { it.date == date }
+                }
+                allowed && free
             }
 
         for (date in suitableDays) {
@@ -202,11 +218,12 @@ class CoachPlanGenerator @Inject constructor(
         newPlans: MutableList<TrainingPlan>,
         weeklyTargetTss: Int,
         isRecoveryWeek: Boolean,
-        phase: TrainingPhase
+        phase: TrainingPhase,
+        allowMultipleActivitiesPerDay: Boolean
     ): Int {
         val date = (0..6).map { weekStartDate.plusDays(it.toLong()) }.find { it.dayOfWeek == longDay } ?: return 0
         if (availability[longDay]?.contains(WorkoutType.BIKE) != true) return 0
-        if (existing[date]?.isNotEmpty() == true || newPlans.any { it.date == date }) return 0
+        if (!allowMultipleActivitiesPerDay && (existing[date]?.isNotEmpty() == true || newPlans.any { it.date == date })) return 0
 
         val ratio = when(phase) {
             TrainingPhase.Base -> 0.35
@@ -237,15 +254,14 @@ class CoachPlanGenerator @Inject constructor(
         newPlans: MutableList<TrainingPlan>,
         userProfile: UserProfile,
         phase: TrainingPhase,
-        balance: TrainingBalance
+        balance: TrainingBalance,
+        allowMultipleActivitiesPerDay: Boolean
     ) {
         val bikeBudget = (budget * (balance.bikePercent / 100.0)).toInt()
         val runBudget = (budget * (balance.runPercent / 100.0)).toInt()
         val swimBudget = (budget * (balance.swimPercent / 100.0)).toInt()
 
-        val availableSlots = (0..6).map { weekStartDate.plusDays(it.toLong()) }
-            .filter { date -> existing[date].isNullOrEmpty() && newPlans.none { it.date == date } }
-            .toMutableList()
+        val allDays = (0..6).map { weekStartDate.plusDays(it.toLong()) }
 
         // Helper to get variety based on phase
         fun getWorkoutVariety(type: WorkoutType): Pair<String, Intensity> {
@@ -273,17 +289,31 @@ class CoachPlanGenerator @Inject constructor(
         }
 
         fun addSession(type: WorkoutType, tss: Int) {
-            if (tss < 20 || availableSlots.isEmpty()) return
+            if (tss < 20) return
+            
             val (subType, intensity) = getWorkoutVariety(type)
+            
+            // Get available slots dynamically - check if day is free based on current state
+            val availableSlots = allDays.filter { date ->
+                val isAllowed = availability[date.dayOfWeek]?.contains(type) == true
+                val isFree = if (allowMultipleActivitiesPerDay) {
+                    true // Multiple activities allowed, day is always available
+                } else {
+                    // Check if day is completely free
+                    existing[date].isNullOrEmpty() && newPlans.none { it.date == date }
+                }
+                isAllowed && isFree
+            }
+            
+            if (availableSlots.isEmpty()) return
             
             // Fatigue rule: No back-to-back high intensity
             val slot = availableSlots.firstOrNull { date ->
-                val isAllowed = availability[date.dayOfWeek]?.contains(type) == true
                 val yesterday = date.minusDays(1)
                 val tomorrow = date.plusDays(1)
                 val surroundingHigh = (newPlans.find { it.date == yesterday || it.date == tomorrow }?.intensity == Intensity.HIGH)
-                isAllowed && !(intensity == Intensity.HIGH && surroundingHigh)
-            } ?: availableSlots.firstOrNull { availability[it.dayOfWeek]?.contains(type) == true }
+                !(intensity == Intensity.HIGH && surroundingHigh)
+            } ?: availableSlots.firstOrNull()
 
             if (slot != null) {
                 val tssPerHour = when(type) {
@@ -299,7 +329,6 @@ class CoachPlanGenerator @Inject constructor(
                     plannedTSS = tss,
                     intensity = intensity
                 ))
-                availableSlots.remove(slot)
             }
         }
 
@@ -310,10 +339,16 @@ class CoachPlanGenerator @Inject constructor(
             WorkoutType.BIKE to bikeBudget
         ).forEach { (type, totalTss) ->
             var remaining = totalTss
-            while (remaining >= 25 && availableSlots.isNotEmpty()) {
+            var attempts = 0
+            val maxAttempts = 20 // Prevent infinite loop
+            while (remaining >= 25 && attempts < maxAttempts) {
+                val previousSize = newPlans.size
                 val sessionTss = remaining.coerceAtMost(if (type == WorkoutType.BIKE) 80 else 60)
                 addSession(type, sessionTss)
+                // If no session was added, break to avoid infinite loop
+                if (newPlans.size == previousSize) break
                 remaining -= sessionTss
+                attempts++
             }
         }
     }

@@ -11,6 +11,7 @@ import com.tripath.ui.coach.CoachScreen
 import com.tripath.ui.dashboard.DashboardScreen
 import com.tripath.ui.planner.WeeklyPlannerScreen
 import com.tripath.ui.progress.ProgressScreen
+import com.tripath.ui.recovery.RecoveryHistoryScreen
 import com.tripath.ui.recovery.RecoveryScreen
 import com.tripath.ui.settings.ProfileEditorScreen
 import com.tripath.ui.settings.SettingsScreen
@@ -23,6 +24,7 @@ sealed class Screen(val route: String) {
     object Stats : Screen("stats")
     object Coach : Screen("coach")
     object Recovery : Screen("recovery")
+    object RecoveryHistory : Screen("recovery_history")
     object Settings : Screen("settings")
     object SyncedExercises : Screen("synced_exercises")
     object ExerciseImportDetail : Screen("exercise_import_detail/{sessionId}") {
@@ -68,7 +70,10 @@ fun TriPathNavigation(
             CoachScreen()
         }
         composable(Screen.Recovery.route) {
-            RecoveryScreen()
+            RecoveryScreen(navController = navController)
+        }
+        composable(Screen.RecoveryHistory.route) {
+            RecoveryHistoryScreen(navController = navController)
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)

@@ -50,6 +50,12 @@ interface WellnessDao {
     fun getLogsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<DailyWellnessLog>>
 
     /**
+     * Get the most recent recorded weight before the given date.
+     */
+    @Query("SELECT morningWeight FROM daily_wellness_logs WHERE morningWeight IS NOT NULL AND date < :currentDate ORDER BY date DESC LIMIT 1")
+    suspend fun getLastRecordedWeight(currentDate: LocalDate): Double?
+
+    /**
      * Insert or update a daily wellness log.
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)

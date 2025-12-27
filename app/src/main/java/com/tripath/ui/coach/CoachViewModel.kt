@@ -252,7 +252,7 @@ class CoachViewModel @Inject constructor(
         }
     }
 
-    fun generateTrainingBlock(clearExisting: Boolean) {
+    fun generateTrainingBlock(clearExisting: Boolean, allowMultipleActivitiesPerDay: Boolean = false) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isGenerating = true)
             
@@ -269,7 +269,7 @@ class CoachViewModel @Inject constructor(
             }
             val startDate = today.plusDays(daysUntilMonday.toLong())
             
-            val block = coachPlanGenerator.generateBlock(startDate, ctl, clearExisting)
+            val block = coachPlanGenerator.generateBlock(startDate, ctl, clearExisting, allowMultipleActivitiesPerDay)
             
             val summary = "Generated ${block.size} sessions for the next 4 weeks.\n" +
                     "Starting TSS: ${block.take(7).sumOf { it.plannedTSS }}\n" +

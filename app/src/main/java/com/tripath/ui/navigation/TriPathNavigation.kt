@@ -22,6 +22,12 @@ sealed class Screen(val route: String) {
     object Stats : Screen("stats")
     object Coach : Screen("coach")
     object Settings : Screen("settings")
+    object SyncedExercises : Screen("synced_exercises")
+    object ExerciseImportDetail : Screen("exercise_import_detail/{sessionId}") {
+        fun createRoute(sessionId: String): String {
+            return "exercise_import_detail/$sessionId"
+        }
+    }
     object ProfileEditor : Screen("profile_editor")
     object Progress : Screen("progress") // Kept for backward compatibility or deep linking
     object WorkoutDetail : Screen("workout_detail/{workoutId}/{isPlanned}") {
@@ -61,6 +67,26 @@ fun TriPathNavigation(
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)
+        }
+        composable(Screen.SyncedExercises.route) {
+            com.tripath.ui.settings.healthconnect.SyncedExercisesScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onExerciseClick = { sessionId ->
+                    navController.navigate(Screen.ExerciseImportDetail.createRoute(sessionId))
+                }
+            )
+        }
+        composable(
+            route = Screen.ExerciseImportDetail.route,
+            arguments = listOf(
+                navArgument("sessionId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val sessionId = backStackEntry.arguments?.getString("sessionId") ?: ""
+            com.tripath.ui.settings.healthconnect.ExerciseImportDetailScreen(
+                sessionId = sessionId,
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
         composable(Screen.ProfileEditor.route) {
             ProfileEditorScreen(onNavigateBack = { navController.popBackStack() })

@@ -7,6 +7,8 @@ package com.tripath.data.model
 enum class StrengthFocus {
     FULL_BODY,
     UPPER,
-    LOWER
+    LOWER,
+    HEAVY,
+    STABILITY
 }
 

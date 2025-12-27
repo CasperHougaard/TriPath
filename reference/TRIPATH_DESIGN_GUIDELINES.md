@@ -463,7 +463,7 @@ ModalBottomSheet(
 ### Sport Icons
 Use Material Icons for consistency:
 - **Run**: `Icons.AutoMirrored.Filled.DirectionsRun`
-- **Bike**: `Icons.Default.PedalBike`
+- **Bike**: `Icons.Filled.DirectionsBike`
 - **Swim**: `Icons.Default.Pool`
 - **Strength**: `Icons.Default.FitnessCenter`
 - **Other**: `Icons.AutoMirrored.Filled.DirectionsWalk`

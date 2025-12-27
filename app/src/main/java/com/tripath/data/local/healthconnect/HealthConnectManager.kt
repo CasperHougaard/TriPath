@@ -1,27 +1,41 @@
 package com.tripath.data.local.healthconnect
 
 import android.content.Context
+import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ExerciseRoute
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.PowerRecord
+import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.tripath.data.model.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
+import com.tripath.data.local.database.dao.RawWorkoutDataDao
+import com.tripath.data.local.database.dao.SleepLogDao
+import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.HeartRateSample
+import com.tripath.domain.PowerSample
 import com.tripath.domain.TrainingMetricsCalculator
+import com.tripath.data.model.RoutePoint
+import com.tripath.domain.ZoneCalculator
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,25 +54,44 @@ data class SyncResult(
     val alreadySynced: Int,
     /** Number of workouts skipped due to unsupported exercise type */
     val skippedUnsupported: Int,
+    /** Number of existing workouts that had route data backfilled */
+    val routeBackfilled: Int = 0,
     /** List of newly imported workouts */
     val newWorkouts: List<WorkoutLog>
 )
 
 /**
- * Detailed result from a Health Connect resync operation.
- * Used to re-classify existing workouts (e.g., fixing walking/hiking misclassified as running).
+ * Detailed result from a Health Connect reprocess operation.
  */
-data class ResyncResult(
-    /** Total workouts found in Health Connect for the date range */
-    val workoutsFound: Int,
-    /** Number of workouts that were updated (type changed) */
-    val updated: Int,
-    /** Number of workouts that remained unchanged */
-    val unchanged: Int,
-    /** Number of new workouts added */
-    val new: Int,
+data class ReprocessResult(
+    /** Total raw workouts found in the database */
+    val foundInDatabase: Int,
+    /** Number of workouts that were successfully reprocessed */
+    val processed: Int,
     /** Number of errors encountered */
     val errors: Int
+)
+
+/**
+ * Detailed result from a sleep sync operation.
+ */
+data class SleepSyncResult(
+    /** Total sleep sessions found in Health Connect */
+    val foundInHealthConnect: Int,
+    /** Number of sleep sessions newly imported */
+    val newlyImported: Int,
+    /** Number already in database */
+    val alreadySynced: Int
+)
+
+/**
+ * Data class for sleep stages (for JSON serialization).
+ */
+@Serializable
+data class SleepStage(
+    val stage: String,
+    val startMillis: Long,
+    val endMillis: Long
 )
 
 /**
@@ -68,8 +101,12 @@ data class ResyncResult(
 @Singleton
 class HealthConnectManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val repository: TrainingRepository
+    private val repository: TrainingRepository,
+    private val rawWorkoutDataDao: RawWorkoutDataDao,
+    private val sleepLogDao: SleepLogDao
 ) {
+    private val json = Json { ignoreUnknownKeys = true }
+    
     private val healthConnectClient: HealthConnectClient? by lazy {
         try {
             if (isAvailable()) {
@@ -83,7 +120,7 @@ class HealthConnectManager @Inject constructor(
     }
 
     /**
-     * Required permissions for reading workout data from Health Connect.
+     * Required permissions for reading workout and sleep data from Health Connect.
      */
     val permissions = setOf(
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
@@ -92,7 +129,8 @@ class HealthConnectManager @Inject constructor(
         HealthPermission.getReadPermission(DistanceRecord::class),
         HealthPermission.getReadPermission(SpeedRecord::class),
         HealthPermission.getReadPermission(PowerRecord::class),
-        HealthPermission.getReadPermission(StepsRecord::class)
+        HealthPermission.getReadPermission(StepsRecord::class),
+        HealthPermission.getReadPermission(SleepSessionRecord::class)
     )
 
     /**
@@ -133,50 +171,15 @@ class HealthConnectManager @Inject constructor(
     fun getPermissionsToRequest() = permissions
 
     /**
-     * Read exercise sessions from Health Connect within a date range.
-     * 
-     * @param startDate The start date for reading workouts (inclusive)
-     * @param endDate The end date for reading workouts (inclusive)
-     * @param userProfile The user profile for TSS calculation.
-     * @return List of WorkoutLog entries converted from Health Connect data
-     */
-    suspend fun readExerciseSessions(
-        startDate: LocalDate,
-        endDate: LocalDate,
-        userProfile: UserProfile
-    ): List<WorkoutLog> {
-        return try {
-            if (!isAvailable() || healthConnectClient == null) {
-                return emptyList()
-            }
-            val startInstant = startDate.atStartOfDay(ZoneId.systemDefault()).toInstant()
-            val endInstant = endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()
-
-            val request = ReadRecordsRequest(
-                recordType = ExerciseSessionRecord::class,
-                timeRangeFilter = TimeRangeFilter.between(startInstant, endInstant)
-            )
-
-            val response = healthConnectClient!!.readRecords(request)
-            
-            response.records.mapNotNull { session ->
-                convertToWorkoutLog(session, userProfile)
-            }
-        } catch (e: Exception) {
-            // Health Connect not available or error reading records
-            emptyList()
-        }
-    }
-
-    /**
      * Read heart rate data for a specific exercise session.
+     * Returns a pair of (Average HR, List of HR samples).
      */
     private suspend fun readHeartRateForSession(
         startTime: Instant,
         endTime: Instant
-    ): Int? {
+    ): Pair<Int?, List<HeartRateSample>> {
         return try {
-            if (healthConnectClient == null) return null
+            if (healthConnectClient == null) return null to emptyList()
             
             val request = ReadRecordsRequest(
                 recordType = HeartRateRecord::class,
@@ -185,14 +188,19 @@ class HealthConnectManager @Inject constructor(
 
             val response = healthConnectClient!!.readRecords(request)
             
-            if (response.records.isEmpty()) return null
+            if (response.records.isEmpty()) return null to emptyList()
 
-            val allSamples = response.records.flatMap { it.samples }
-            if (allSamples.isEmpty()) return null
+            val allSamples = response.records.flatMap { record ->
+                record.samples.map { sample ->
+                    HeartRateSample(sample.time, sample.beatsPerMinute.toInt())
+                }
+            }
+            if (allSamples.isEmpty()) return null to emptyList()
 
-            allSamples.map { it.beatsPerMinute }.average().toInt()
+            val avgHr = allSamples.map { it.bpm }.average().toInt()
+            avgHr to allSamples
         } catch (e: Exception) {
-            null
+            null to emptyList()
         }
     }
 
@@ -275,27 +283,33 @@ class HealthConnectManager @Inject constructor(
 
     /**
      * Read average power for a specific exercise session.
+     * Returns a pair of (Average Power, List of Power samples).
      */
     private suspend fun readPowerForSession(
         startTime: Instant,
         endTime: Instant
-    ): Int? {
+    ): Pair<Int?, List<PowerSample>> {
         return try {
-            if (healthConnectClient == null) return null
+            if (healthConnectClient == null) return null to emptyList()
             
             val request = ReadRecordsRequest(
                 recordType = PowerRecord::class,
                 timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
             )
             val response = healthConnectClient!!.readRecords(request)
-            if (response.records.isEmpty()) return null
+            if (response.records.isEmpty()) return null to emptyList()
             
-            val allSamples = response.records.flatMap { it.samples }
-            if (allSamples.isEmpty()) return null
+            val allSamples = response.records.flatMap { record ->
+                record.samples.map { sample ->
+                    PowerSample(sample.time, sample.power.inWatts.toInt())
+                }
+            }
+            if (allSamples.isEmpty()) return null to emptyList()
             
-            allSamples.map { it.power.inWatts }.average().toInt()
+            val avgPower = allSamples.map { it.watts }.average().toInt()
+            avgPower to allSamples
         } catch (e: Exception) {
-            null
+            null to emptyList()
         }
     }
 
@@ -322,54 +336,39 @@ class HealthConnectManager @Inject constructor(
     }
 
     /**
-     * Convert a Health Connect ExerciseSessionRecord to our WorkoutLog entity.
+     * Extract GPS route points from an exercise session.
+     * Returns a JSON string of RoutePoint list if available.
      */
-    private suspend fun convertToWorkoutLog(
-        session: ExerciseSessionRecord,
-        userProfile: UserProfile
-    ): WorkoutLog? {
-        val workoutType = mapExerciseType(session.exerciseType) ?: return null
-        
-        val durationMinutes = java.time.Duration.between(
-            session.startTime,
-            session.endTime
-        ).toMinutes().toInt()
-
-        val avgHeartRate = readHeartRateForSession(session.startTime, session.endTime)
-        val calories = readCaloriesForSession(session.startTime, session.endTime)
-        
-        // New fields
-        val distance = readDistanceForSession(session.startTime, session.endTime)
-        val speed = readSpeedForSession(session.startTime, session.endTime)
-        val power = readPowerForSession(session.startTime, session.endTime)
-        val steps = readStepsForSession(session.startTime, session.endTime)
-
-        // Calculate TSS using the new Calculation Engine
-        val computedTSS = TrainingMetricsCalculator.calculateTSS(
-            workoutType = workoutType,
-            durationMin = durationMinutes,
-            avgHr = avgHeartRate,
-            avgPower = power,
-            userProfile = userProfile
-        )
-
-        val date = session.startTime
-            .atZone(ZoneId.systemDefault())
-            .toLocalDate()
-
-        return WorkoutLog(
-            connectId = session.metadata.id,
-            date = date,
-            type = workoutType,
-            durationMinutes = durationMinutes,
-            avgHeartRate = avgHeartRate,
-            calories = calories,
-            computedTSS = computedTSS,
-            distanceMeters = distance,
-            avgSpeedKmh = speed,
-            avgPowerWatts = power,
-            steps = steps
-        )
+    private suspend fun readRouteForSession(
+        session: ExerciseSessionRecord
+    ): String? = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val routeResult = session.exerciseRouteResult
+            
+            // Check if we have route data - exerciseRouteResult can be:
+            // - ExerciseRoute (contains the actual route data)
+            // - null (no route data available)
+            val route = routeResult as? ExerciseRoute ?: return@withContext null
+            
+            val routePoints = route.route.map { location ->
+                RoutePoint(
+                    lat = location.latitude,
+                    lon = location.longitude,
+                    alt = location.altitude?.inMeters,
+                    t = location.time.toEpochMilli()
+                )
+            }
+            
+            if (routePoints.isEmpty()) return@withContext null
+            
+            // Serialize on Default dispatcher for CPU-intensive work
+            withContext(Dispatchers.Default) {
+                json.encodeToString(routePoints)
+            }
+        } catch (e: Exception) {
+            Log.d("HealthConnect", "No route data available: ${e.message}")
+            null
+        }
     }
 
     /**
@@ -403,15 +402,72 @@ class HealthConnectManager @Inject constructor(
     }
 
     /**
-     * Get all workout logs from the database (both synced from Health Connect and any manual entries).
+     * Read raw exercise sessions from Health Connect within a date range.
+     * Unlike readExerciseSessions, this returns the original Health Connect records.
      */
+    suspend fun readRawExerciseSessions(
+        startDate: LocalDate,
+        endDate: LocalDate
+    ): List<ExerciseSessionRecord> = withContext(Dispatchers.IO) {
+        try {
+            if (!isAvailable() || healthConnectClient == null) {
+                return@withContext emptyList()
+            }
+            val startInstant = startDate.atStartOfDay(ZoneId.systemDefault()).toInstant()
+            val endInstant = endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()
+
+            val request = ReadRecordsRequest(
+                recordType = ExerciseSessionRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(startInstant, endInstant)
+            )
+
+            val response = healthConnectClient!!.readRecords(request)
+            response.records.sortedByDescending { it.startTime }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Get a specific exercise session by its ID.
+     */
+    suspend fun getExerciseSession(sessionId: String): ExerciseSessionRecord? = withContext(Dispatchers.IO) {
+        try {
+            if (!isAvailable() || healthConnectClient == null) return@withContext null
+            
+            val response = healthConnectClient!!.readRecord(
+                ExerciseSessionRecord::class,
+                sessionId
+            )
+            response.record
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Get all raw data associated with a session time range.
+     */
+    suspend fun getSessionRawData(startTime: Instant, endTime: Instant): Map<String, Any?> = withContext(Dispatchers.IO) {
+        val data = mutableMapOf<String, Any?>()
+        
+        data["HeartRate"] = readHeartRateForSession(startTime, endTime).second
+        data["Calories"] = readCaloriesForSession(startTime, endTime)
+        data["Distance"] = readDistanceForSession(startTime, endTime)
+        data["Speed"] = readSpeedForSession(startTime, endTime)
+        data["Power"] = readPowerForSession(startTime, endTime).second
+        data["Steps"] = readStepsForSession(startTime, endTime)
+        
+        data
+    }
+
     fun getAllSyncedWorkouts(): Flow<List<WorkoutLog>> {
         return repository.getAllWorkoutLogs()
     }
 
     /**
      * Sync workouts from Health Connect to the local database.
-     * Only inserts workouts that don't already exist (based on connectId).
+     * Only inserts workouts that don't already exist in RawWorkoutData.
      * 
      * @param daysToLookBack Number of days to look back from today (defaults to 30)
      * @return Result containing detailed sync information
@@ -444,28 +500,95 @@ class HealthConnectManager @Inject constructor(
             val rawSessions = healthConnectClient?.readRecords(request)?.records ?: emptyList()
             val totalFoundInHealthConnect = rawSessions.size
             
-            // Convert to WorkoutLog (this filters unsupported types)
-            val workouts = readExerciseSessions(startDate, endDate, userProfile)
-            val skippedUnsupported = totalFoundInHealthConnect - workouts.size
-            
-            // Check each workout and only insert if it doesn't exist
+            var newlyImportedCount = 0
+            var alreadySyncedCount = 0
+            var skippedUnsupportedCount = 0
+            var routeBackfilledCount = 0
             val newWorkouts = mutableListOf<WorkoutLog>()
-            var alreadySynced = 0
-            
-            for (workout in workouts) {
-                if (!repository.workoutLogExists(workout.connectId)) {
-                    repository.insertWorkoutLog(workout)
-                    newWorkouts.add(workout)
-                } else {
-                    alreadySynced++
+
+            for (session in rawSessions) {
+                val connectId = session.metadata.id
+                
+                // Check if already stored in raw data table
+                val existingData = rawWorkoutDataDao.getByConnectId(connectId)
+                if (existingData != null) {
+                    // Check if we need to backfill route data
+                    if (existingData.routeJson == null) {
+                        val routeJson = readRouteForSession(session)
+                        if (routeJson != null) {
+                            rawWorkoutDataDao.updateRoute(connectId, routeJson)
+                            routeBackfilledCount++
+                            Log.d("HealthConnect", "Backfilled route data for $connectId")
+                        }
+                    }
+                    alreadySyncedCount++
+                    continue
                 }
+
+                val workoutType = mapExerciseType(session.exerciseType)
+                if (workoutType == null) {
+                    skippedUnsupportedCount++
+                    continue
+                }
+
+                // 1. Fetch all raw data associated with this session
+                val (avgHeartRate, hrSamples) = readHeartRateForSession(session.startTime, session.endTime)
+                val (avgPower, powerSamples) = readPowerForSession(session.startTime, session.endTime)
+                val calories = readCaloriesForSession(session.startTime, session.endTime)
+                val distance = readDistanceForSession(session.startTime, session.endTime)
+                val speed = readSpeedForSession(session.startTime, session.endTime)
+                val steps = readStepsForSession(session.startTime, session.endTime)
+                val routeJson = readRouteForSession(session)
+
+                // 2. Serialize samples on Default dispatcher
+                val hrSamplesJson = if (hrSamples.isNotEmpty()) {
+                    withContext(Dispatchers.Default) { json.encodeToString(hrSamples) }
+                } else null
+                
+                val powerSamplesJson = if (powerSamples.isNotEmpty()) {
+                    withContext(Dispatchers.Default) { json.encodeToString(powerSamples) }
+                } else null
+
+                // 3. Check storage size and log warning if > 100KB
+                val totalJsonSize = (hrSamplesJson?.length ?: 0) + (powerSamplesJson?.length ?: 0) + (routeJson?.length ?: 0)
+                if (totalJsonSize > 100_000) {
+                    Log.w("HealthConnect", "Large workout data: ${totalJsonSize / 1024}KB for session $connectId (HR: ${hrSamplesJson?.length ?: 0}, Power: ${powerSamplesJson?.length ?: 0}, Route: ${routeJson?.length ?: 0})")
+                }
+
+                // 4. Store in RawWorkoutData table
+                val rawData = RawWorkoutData(
+                    connectId = connectId,
+                    rawExerciseType = session.exerciseType,
+                    startTimeMillis = session.startTime.toEpochMilli(),
+                    endTimeMillis = session.endTime.toEpochMilli(),
+                    hrSamplesJson = hrSamplesJson,
+                    powerSamplesJson = powerSamplesJson,
+                    rawCalories = calories,
+                    rawDistanceMeters = distance,
+                    rawSteps = steps,
+                    routeJson = routeJson
+                )
+                rawWorkoutDataDao.insert(rawData)
+
+                // 5. Process into WorkoutLog using current UserProfile
+                val workoutLog = processRawDataToWorkoutLog(
+                    rawData = rawData,
+                    hrSamples = hrSamples,
+                    powerSamples = powerSamples,
+                    userProfile = userProfile
+                )
+                
+                repository.insertWorkoutLog(workoutLog)
+                newWorkouts.add(workoutLog)
+                newlyImportedCount++
             }
             
             Result.success(SyncResult(
                 foundInHealthConnect = totalFoundInHealthConnect,
-                newlyImported = newWorkouts.size,
-                alreadySynced = alreadySynced,
-                skippedUnsupported = skippedUnsupported,
+                newlyImported = newlyImportedCount,
+                alreadySynced = alreadySyncedCount,
+                skippedUnsupported = skippedUnsupportedCount,
+                routeBackfilled = routeBackfilledCount,
                 newWorkouts = newWorkouts
             ))
         } catch (e: Exception) {
@@ -474,14 +597,130 @@ class HealthConnectManager @Inject constructor(
     }
 
     /**
-     * Resync workout history to re-classify existing workouts.
-     * Re-fetches workouts from Health Connect and updates existing records if their type has changed.
-     * This is useful for fixing misclassified workouts (e.g., walking/hiking previously saved as RUN).
+     * Process raw workout data into a WorkoutLog.
+     * All calculations are performed on Dispatchers.Default.
+     */
+    private suspend fun processRawDataToWorkoutLog(
+        rawData: RawWorkoutData,
+        hrSamples: List<HeartRateSample>,
+        powerSamples: List<PowerSample>,
+        userProfile: UserProfile
+    ): WorkoutLog = withContext(Dispatchers.Default) {
+        val workoutType = mapExerciseType(rawData.rawExerciseType) ?: WorkoutType.OTHER
+        
+        val durationMinutes = ((rawData.endTimeMillis - rawData.startTimeMillis) / 60000).toInt()
+        
+        val avgHeartRate = if (hrSamples.isNotEmpty()) {
+            hrSamples.map { it.bpm }.average().toInt()
+        } else null
+        
+        val avgPower = if (powerSamples.isNotEmpty()) {
+            powerSamples.map { it.watts }.average().toInt()
+        } else null
+
+        // Calculate Zone Distributions
+        val hrZoneDistribution = if (hrSamples.isNotEmpty() && userProfile.maxHeartRate != null) {
+            ZoneCalculator.calculateHrZoneDistribution(hrSamples, userProfile.maxHeartRate)
+        } else null
+
+        val powerZoneDistribution = if (powerSamples.isNotEmpty() && userProfile.ftpBike != null) {
+            ZoneCalculator.calculatePowerZoneDistribution(powerSamples, userProfile.ftpBike)
+        } else null
+
+        // Calculate TSS
+        val computedTSS = TrainingMetricsCalculator.calculateTSS(
+            workoutType = workoutType,
+            durationMin = durationMinutes,
+            avgHr = avgHeartRate,
+            avgPower = avgPower,
+            userProfile = userProfile
+        )
+
+        val date = Instant.ofEpochMilli(rawData.startTimeMillis)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDate()
+
+        val avgSpeedKmh = if (rawData.rawDistanceMeters != null && durationMinutes > 0) {
+            (rawData.rawDistanceMeters / 1000.0) / (durationMinutes / 60.0)
+        } else null
+
+        WorkoutLog(
+            connectId = rawData.connectId,
+            date = date,
+            type = workoutType,
+            durationMinutes = durationMinutes,
+            avgHeartRate = avgHeartRate,
+            calories = rawData.rawCalories,
+            computedTSS = computedTSS,
+            distanceMeters = rawData.rawDistanceMeters,
+            avgSpeedKmh = avgSpeedKmh,
+            avgPowerWatts = avgPower,
+            steps = rawData.rawSteps,
+            hrZoneDistribution = hrZoneDistribution,
+            powerZoneDistribution = powerZoneDistribution
+        )
+    }
+
+    /**
+     * Reprocess all workouts in the database using the latest UserProfile settings.
+     * Uses local RawWorkoutData, so it doesn't require Health Connect permissions.
+     */
+    suspend fun reprocessAllWorkouts(): Result<ReprocessResult> = withContext(Dispatchers.IO) {
+        try {
+            val userProfile = repository.getUserProfileOnce() ?: UserProfile()
+            val allRawData = rawWorkoutDataDao.getAll()
+            var processedCount = 0
+            var errorCount = 0
+
+            for (rawData in allRawData) {
+                try {
+                    // Deserialize samples on Default dispatcher
+                    val hrSamples = if (!rawData.hrSamplesJson.isNullOrEmpty()) {
+                        withContext(Dispatchers.Default) {
+                            json.decodeFromString<List<HeartRateSample>>(rawData.hrSamplesJson)
+                        }
+                    } else emptyList()
+
+                    val powerSamples = if (!rawData.powerSamplesJson.isNullOrEmpty()) {
+                        withContext(Dispatchers.Default) {
+                            json.decodeFromString<List<PowerSample>>(rawData.powerSamplesJson)
+                        }
+                    } else emptyList()
+
+                    // Recalculate everything
+                    val updatedWorkoutLog = processRawDataToWorkoutLog(
+                        rawData = rawData,
+                        hrSamples = hrSamples,
+                        powerSamples = powerSamples,
+                        userProfile = userProfile
+                    )
+
+                    repository.insertWorkoutLog(updatedWorkoutLog)
+                    processedCount++
+                } catch (e: Exception) {
+                    Log.e("HealthConnect", "Error reprocessing workout ${rawData.connectId}", e)
+                    errorCount++
+                }
+            }
+
+            Result.success(ReprocessResult(
+                foundInDatabase = allRawData.size,
+                processed = processedCount,
+                errors = errorCount
+            ))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sync sleep sessions from Health Connect to the local database.
+     * Only inserts sleep sessions that don't already exist.
      * 
      * @param daysToLookBack Number of days to look back from today (defaults to 30)
-     * @return Result containing detailed resync information
+     * @return Result containing detailed sync information
      */
-    suspend fun resyncHistory(daysToLookBack: Int = 30): Result<ResyncResult> = withContext(Dispatchers.IO) {
+    suspend fun syncSleep(daysToLookBack: Int = 30): Result<SleepSyncResult> = withContext(Dispatchers.IO) {
         try {
             if (!isAvailable()) {
                 return@withContext Result.failure(IllegalStateException("Health Connect is not available"))
@@ -491,71 +730,119 @@ class HealthConnectManager @Inject constructor(
                 return@withContext Result.failure(SecurityException("Health Connect permissions not granted"))
             }
             
-            // Fetch UserProfile for TSS calculations
-            val userProfile = repository.getUserProfileOnce() ?: UserProfile()
-
             val endDate = LocalDate.now()
             val startDate = endDate.minusDays(daysToLookBack.toLong())
             
-            // Read raw exercise sessions to count total found
             val startInstant = startDate.atStartOfDay(ZoneId.systemDefault()).toInstant()
             val endInstant = endDate.plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant()
             
             val request = ReadRecordsRequest(
-                recordType = ExerciseSessionRecord::class,
+                recordType = SleepSessionRecord::class,
                 timeRangeFilter = TimeRangeFilter.between(startInstant, endInstant)
             )
             
-            val rawSessions = healthConnectClient?.readRecords(request)?.records ?: emptyList()
-            val totalFound = rawSessions.size
+            val sleepSessions = healthConnectClient?.readRecords(request)?.records ?: emptyList()
+            val totalFoundInHealthConnect = sleepSessions.size
             
-            // Process each session
-            var updated = 0
-            var unchanged = 0
-            var new = 0
-            var errors = 0
+            var newlyImportedCount = 0
+            var alreadySyncedCount = 0
             
-            for (session in rawSessions) {
-                try {
-                    val convertedWorkout = convertToWorkoutLog(session, userProfile)
-                    if (convertedWorkout == null) {
-                        // Unsupported exercise type - skip
-                        continue
-                    }
-                    
-                    val existingWorkout = repository.getWorkoutLogByConnectId(convertedWorkout.connectId)
-                    
-                    if (existingWorkout != null) {
-                        // Workout exists - check if type changed
-                        if (existingWorkout.type != convertedWorkout.type) {
-                            // Type changed - update the record
-                            repository.insertWorkoutLog(convertedWorkout) // Uses REPLACE strategy
-                            updated++
-                        } else {
-                            // Type unchanged
-                            unchanged++
-                        }
-                    } else {
-                        // New workout - insert it
-                        repository.insertWorkoutLog(convertedWorkout)
-                        new++
-                    }
-                } catch (e: Exception) {
-                    errors++
-                    // Continue processing other workouts even if one fails
+            for (session in sleepSessions) {
+                val connectId = session.metadata.id
+                
+                // Check if already stored
+                if (sleepLogDao.exists(connectId)) {
+                    alreadySyncedCount++
+                    continue
                 }
+                
+                // Calculate sleep duration and stage breakdown
+                val durationMinutes = ((session.endTime.toEpochMilli() - session.startTime.toEpochMilli()) / 60000).toInt()
+                
+                // Process sleep stages
+                val stages = session.stages.map { stage ->
+                    SleepStage(
+                        stage = mapSleepStage(stage.stage),
+                        startMillis = stage.startTime.toEpochMilli(),
+                        endMillis = stage.endTime.toEpochMilli()
+                    )
+                }
+                
+                val stagesJson = if (stages.isNotEmpty()) {
+                    withContext(Dispatchers.Default) { json.encodeToString(stages) }
+                } else null
+                
+                // Calculate time in each stage
+                val deepSleepMinutes = calculateStageMinutes(stages, listOf("deep"))
+                val lightSleepMinutes = calculateStageMinutes(stages, listOf("light"))
+                val remSleepMinutes = calculateStageMinutes(stages, listOf("rem"))
+                val awakeMinutes = calculateStageMinutes(stages, listOf("awake", "awake_in_bed", "out_of_bed"))
+                
+                val date = Instant.ofEpochMilli(session.startTime.toEpochMilli())
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate()
+                
+                val sleepLog = SleepLog(
+                    connectId = connectId,
+                    date = date,
+                    startTimeMillis = session.startTime.toEpochMilli(),
+                    endTimeMillis = session.endTime.toEpochMilli(),
+                    durationMinutes = durationMinutes,
+                    title = session.title,
+                    stagesJson = stagesJson,
+                    deepSleepMinutes = deepSleepMinutes,
+                    lightSleepMinutes = lightSleepMinutes,
+                    remSleepMinutes = remSleepMinutes,
+                    awakeMinutes = awakeMinutes
+                )
+                
+                sleepLogDao.insert(sleepLog)
+                newlyImportedCount++
             }
             
-            Result.success(ResyncResult(
-                workoutsFound = totalFound,
-                updated = updated,
-                unchanged = unchanged,
-                new = new,
-                errors = errors
+            Result.success(SleepSyncResult(
+                foundInHealthConnect = totalFoundInHealthConnect,
+                newlyImported = newlyImportedCount,
+                alreadySynced = alreadySyncedCount
             ))
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+    
+    /**
+     * Map Health Connect sleep stage to readable string.
+     */
+    private fun mapSleepStage(stage: Int): String {
+        return when (stage) {
+            SleepSessionRecord.STAGE_TYPE_AWAKE -> "awake"
+            SleepSessionRecord.STAGE_TYPE_SLEEPING -> "sleeping"
+            SleepSessionRecord.STAGE_TYPE_OUT_OF_BED -> "out_of_bed"
+            SleepSessionRecord.STAGE_TYPE_LIGHT -> "light"
+            SleepSessionRecord.STAGE_TYPE_DEEP -> "deep"
+            SleepSessionRecord.STAGE_TYPE_REM -> "rem"
+            SleepSessionRecord.STAGE_TYPE_AWAKE_IN_BED -> "awake_in_bed"
+            else -> "unknown"
+        }
+    }
+    
+    /**
+     * Calculate total minutes spent in specific sleep stages.
+     */
+    private fun calculateStageMinutes(stages: List<SleepStage>, stageNames: List<String>): Int? {
+        val filteredStages = stages.filter { it.stage in stageNames }
+        if (filteredStages.isEmpty()) return null
+        
+        return filteredStages.sumOf { 
+            ((it.endMillis - it.startMillis) / 60000).toInt() 
+        }
+    }
+    
+    /**
+     * Get all sleep logs from the database.
+     */
+    fun getAllSleepLogs(): Flow<List<SleepLog>> {
+        return sleepLogDao.getAll()
     }
 }
 

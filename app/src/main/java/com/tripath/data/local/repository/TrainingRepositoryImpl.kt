@@ -2,11 +2,15 @@ package com.tripath.data.local.repository
 
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.RawWorkoutDataDao
+import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
+import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
@@ -25,6 +29,8 @@ import javax.inject.Inject
 class TrainingRepositoryImpl @Inject constructor(
     private val trainingPlanDao: TrainingPlanDao,
     private val workoutLogDao: WorkoutLogDao,
+    private val rawWorkoutDataDao: RawWorkoutDataDao,
+    private val sleepLogDao: SleepLogDao,
     private val preferencesManager: PreferencesManager,
     private val specialPeriodDao: SpecialPeriodDao,
     private val dayNoteDao: DayNoteDao,
@@ -62,6 +68,9 @@ class TrainingRepositoryImpl @Inject constructor(
 
     override suspend fun deleteAllTrainingPlans() =
         trainingPlanDao.deleteAll()
+
+    override suspend fun deleteTrainingPlansByDateRange(startDate: LocalDate, endDate: LocalDate) =
+        trainingPlanDao.deleteByDateRange(startDate.toEpochDay(), endDate.toEpochDay())
 
     override suspend fun copyWeek(sourceStartDate: LocalDate, targetStartDate: LocalDate) {
         withContext(Dispatchers.IO) {
@@ -116,6 +125,34 @@ class TrainingRepositoryImpl @Inject constructor(
     override suspend fun workoutLogExists(connectId: String): Boolean =
         workoutLogDao.exists(connectId)
 
+    // ==================== Raw Workout Data Operations ====================
+
+    override suspend fun getAllRawWorkoutDataOnce(): List<RawWorkoutData> =
+        rawWorkoutDataDao.getAll()
+
+    override suspend fun getRawWorkoutData(connectId: String): RawWorkoutData? =
+        rawWorkoutDataDao.getByConnectId(connectId)
+
+    override suspend fun insertRawWorkoutData(data: List<RawWorkoutData>) {
+        withContext(Dispatchers.IO) {
+            data.forEach { rawWorkoutDataDao.insert(it) }
+        }
+    }
+
+    // ==================== Sleep Log Operations ====================
+
+    override fun getAllSleepLogs(): Flow<List<SleepLog>> =
+        sleepLogDao.getAll()
+
+    override suspend fun getAllSleepLogsOnce(): List<SleepLog> =
+        sleepLogDao.getAllOnce()
+
+    override suspend fun insertSleepLogs(logs: List<SleepLog>) =
+        sleepLogDao.insertAll(logs)
+
+    override suspend fun deleteAllSleepLogs() =
+        sleepLogDao.deleteAll()
+
     // ==================== User Profile Operations ====================
 
     override fun getUserProfile(): Flow<UserProfile?> =
@@ -136,6 +173,8 @@ class TrainingRepositoryImpl @Inject constructor(
         withContext(Dispatchers.IO) {
             trainingPlanDao.deleteAll()
             workoutLogDao.deleteAll()
+            rawWorkoutDataDao.deleteAll()
+            sleepLogDao.deleteAll()
             // Clear user profile from DataStore
             preferencesManager.deleteUserProfile()
             specialPeriodDao.deleteAll()

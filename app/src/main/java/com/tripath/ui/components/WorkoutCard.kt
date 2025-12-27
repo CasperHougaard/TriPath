@@ -9,10 +9,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.FitnessCenter
-import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.Pool
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -112,10 +112,11 @@ fun WorkoutCard(
     }
 }
 
+@Composable
 private fun getWorkoutIcon(type: WorkoutType): ImageVector {
     return when (type) {
         WorkoutType.RUN -> Icons.AutoMirrored.Filled.DirectionsRun
-        WorkoutType.BIKE -> Icons.Default.PedalBike
+        WorkoutType.BIKE -> Icons.AutoMirrored.Filled.DirectionsBike
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
@@ -127,13 +128,16 @@ private fun formatStrengthFocus(focus: StrengthFocus): String {
         StrengthFocus.FULL_BODY -> "Full Body"
         StrengthFocus.UPPER -> "Upper"
         StrengthFocus.LOWER -> "Lower"
+        StrengthFocus.HEAVY -> "Heavy Strength"
+        StrengthFocus.STABILITY -> "Stability & Core"
     }
 }
 
 private fun formatIntensity(intensity: Intensity): String {
     return when (intensity) {
-        Intensity.LIGHT -> "Light"
-        Intensity.HEAVY -> "Heavy"
+        Intensity.LIGHT, Intensity.LOW -> "Light"
+        Intensity.HEAVY, Intensity.HIGH -> "Heavy"
+        Intensity.MODERATE -> "Moderate"
     }
 }
 

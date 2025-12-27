@@ -1,11 +1,13 @@
 package com.tripath.data.model
 
 /**
- * Represents the intensity level for strength training workouts.
- * Only applicable when WorkoutType is STRENGTH.
+ * Represents the intensity level for workouts.
  */
 enum class Intensity {
-    LIGHT,
-    HEAVY
+    LOW,
+    MODERATE,
+    HIGH,
+    LIGHT, // Maps to LOW
+    HEAVY  // Maps to HIGH
 }
 

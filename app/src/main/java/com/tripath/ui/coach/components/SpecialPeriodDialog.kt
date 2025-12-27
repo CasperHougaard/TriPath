@@ -39,6 +39,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("DEPRECATION") // menuAnchor() is deprecated but replacement API not available in current Material3 version
 @Composable
 fun SpecialPeriodDialog(
     initialType: SpecialPeriodType = SpecialPeriodType.INJURY,

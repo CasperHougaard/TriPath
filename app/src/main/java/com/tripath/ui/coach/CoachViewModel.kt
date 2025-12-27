@@ -4,10 +4,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.SpecialPeriodType
+import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.UserProfile
+import com.tripath.data.model.WorkoutType
 import com.tripath.domain.CoachEngine
+import com.tripath.domain.CoachPlanGenerator
 import com.tripath.domain.PerformanceMetrics
 import com.tripath.domain.TrainingMetricsCalculator
 import com.tripath.domain.TrainingPhase
@@ -21,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
@@ -42,12 +47,21 @@ data class CoachUiState(
     val performanceData: List<PerformanceDataPoint> = emptyList(),
     val goalDate: LocalDate? = null,
     val isLoading: Boolean = false,
-    val formStatus: FormStatus = FormStatus.OPTIMAL
+    val formStatus: FormStatus = FormStatus.OPTIMAL,
+    val userProfile: UserProfile? = null,
+    
+    // Generation State
+    val isGenerating: Boolean = false,
+    val generatedBlock: List<TrainingPlan>? = null,
+    val showPlanConfirmation: Boolean = false,
+    val generationSummary: String = "",
+    val clearExistingOnConfirm: Boolean = false
 )
 
 @HiltViewModel
 class CoachViewModel @Inject constructor(
-    private val repository: TrainingRepository
+    private val repository: TrainingRepository,
+    private val coachPlanGenerator: CoachPlanGenerator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CoachUiState())
@@ -81,7 +95,8 @@ class CoachViewModel @Inject constructor(
                 if (profile == null) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        coachAssessment = "Please set up your user profile and goal date to receive coaching."
+                        coachAssessment = "Please set up your user profile and goal date to receive coaching.",
+                        userProfile = null
                     )
                     return@collect
                 }
@@ -119,7 +134,8 @@ class CoachViewModel @Inject constructor(
                     performanceData = performanceData,
                     goalDate = goalDate,
                     isLoading = false,
-                    formStatus = formStatus
+                    formStatus = formStatus,
+                    userProfile = profile
                 )
             }
         }
@@ -235,5 +251,85 @@ class CoachViewModel @Inject constructor(
             }
         }
     }
-}
 
+    fun generateTrainingBlock(clearExisting: Boolean) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isGenerating = true)
+            
+            val ctl = _uiState.value.performanceMetrics.ctl
+            
+            // Calculate next Monday
+            val today = LocalDate.now()
+            val daysUntilMonday = when (today.dayOfWeek) {
+                java.time.DayOfWeek.MONDAY -> 7 // If today is Monday, use next Monday
+                else -> {
+                    val daysToAdd = 8 - today.dayOfWeek.value // Monday is 1, so 8 - value gives days until next Monday
+                    daysToAdd
+                }
+            }
+            val startDate = today.plusDays(daysUntilMonday.toLong())
+            
+            val block = coachPlanGenerator.generateBlock(startDate, ctl, clearExisting)
+            
+            val summary = "Generated ${block.size} sessions for the next 4 weeks.\n" +
+                    "Starting TSS: ${block.take(7).sumOf { it.plannedTSS }}\n" +
+                    "Focus: ${_uiState.value.currentPhase?.displayName ?: "General Fitness"}"
+
+            _uiState.value = _uiState.value.copy(
+                isGenerating = false,
+                generatedBlock = block,
+                showPlanConfirmation = true,
+                generationSummary = summary,
+                clearExistingOnConfirm = clearExisting
+            )
+        }
+    }
+
+    fun confirmTrainingBlock() {
+        val block = _uiState.value.generatedBlock ?: return
+        val clearExisting = _uiState.value.clearExistingOnConfirm
+        
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                if (clearExisting && block.isNotEmpty()) {
+                    val startDate = block.minOf { it.date }
+                    val endDate = block.maxOf { it.date }
+                    repository.deleteTrainingPlansByDateRange(startDate, endDate)
+                }
+                repository.insertTrainingPlans(block)
+            }
+            _uiState.value = _uiState.value.copy(
+                showPlanConfirmation = false,
+                generatedBlock = null
+            )
+        }
+    }
+
+    fun dismissTrainingBlock() {
+        _uiState.value = _uiState.value.copy(
+            showPlanConfirmation = false,
+            generatedBlock = null
+        )
+    }
+
+    fun updateAvailability(
+        weeklyAvailability: Map<DayOfWeek, List<WorkoutType>>,
+        longTrainingDay: DayOfWeek,
+        strengthDays: Int,
+        trainingBalance: TrainingBalance
+    ) {
+        val currentProfile = _uiState.value.userProfile ?: return
+        val updatedProfile = currentProfile.copy(
+            weeklyAvailability = weeklyAvailability,
+            longTrainingDay = longTrainingDay,
+            strengthDays = strengthDays,
+            trainingBalance = trainingBalance
+        )
+        
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                repository.upsertUserProfile(updatedProfile)
+            }
+        }
+    }
+}

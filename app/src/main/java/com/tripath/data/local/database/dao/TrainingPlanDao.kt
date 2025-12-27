@@ -97,6 +97,12 @@ interface TrainingPlanDao {
     suspend fun deleteAll()
 
     /**
+     * Delete training plans within a date range.
+     */
+    @Query("DELETE FROM training_plans WHERE date >= :startDate AND date <= :endDate")
+    suspend fun deleteByDateRange(startDate: Long, endDate: Long)
+
+    /**
      * Get count of training plans.
      */
     @Query("SELECT COUNT(*) FROM training_plans")

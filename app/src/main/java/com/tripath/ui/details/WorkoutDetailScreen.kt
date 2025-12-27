@@ -19,10 +19,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FitnessCenter
-import androidx.compose.material.icons.filled.PedalBike
 import androidx.compose.material.icons.filled.Pool
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -61,9 +61,17 @@ import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
+import com.tripath.data.model.RoutePoint
+import com.tripath.domain.IntensityCalculator
+import com.tripath.domain.IntensityTagColor
+import com.tripath.ui.components.IntensityTag
+import com.tripath.ui.components.RouteViewer
+import com.tripath.ui.components.SmartAdviceCard
+import com.tripath.ui.components.charts.ZoneDistributionChart
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.toColor
 import java.time.format.DateTimeFormatter
+import androidx.compose.ui.graphics.Color
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,6 +144,7 @@ fun WorkoutDetailScreen(
                             log = uiState.workoutLog!!,
                             linkedPlan = uiState.linkedPlan,
                             userProfile = uiState.userProfile,
+                            route = uiState.route,
                             viewModel = viewModel
                         )
                     }
@@ -177,6 +186,14 @@ private fun PlannedWorkoutContent(
     viewModel: WorkoutDetailViewModel,
     modifier: Modifier = Modifier
 ) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val advice = IntensityCalculator.getAdvice(
+        workoutType = plan.type,
+        tss = plan.plannedTSS,
+        durationMinutes = plan.durationMinutes,
+        userProfile = uiState.userProfile
+    )
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -188,8 +205,13 @@ private fun PlannedWorkoutContent(
         WorkoutHeader(
             workoutType = plan.type,
             date = plan.date.format(DateTimeFormatter.ofPattern("EEEE, MMM d, yyyy")),
-            tss = plan.plannedTSS
+            tss = plan.plannedTSS,
+            intensityLabel = advice.zoneLabel,
+            tagColor = advice.tagColor
         )
+
+        // Smart Advice Section
+        SmartAdviceCard(advice = advice.advice, warning = advice.warning)
 
         // Metrics Grid
         PlannedMetricsGrid(plan = plan)
@@ -216,6 +238,7 @@ private fun CompletedWorkoutContent(
     log: WorkoutLog,
     linkedPlan: TrainingPlan?,
     userProfile: UserProfile?,
+    route: List<RoutePoint>?,
     viewModel: WorkoutDetailViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -233,6 +256,33 @@ private fun CompletedWorkoutContent(
             tss = log.computedTSS ?: 0
         )
 
+        // Route Viewer
+        if (route != null && route.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(Spacing.lg)
+                ) {
+                    Text(
+                        text = "Route",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = Spacing.md)
+                    )
+                    RouteViewer(
+                        route = route,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                    )
+                }
+            }
+        }
+
         // Metrics Grid
         CompletedMetricsGrid(log = log, linkedPlan = linkedPlan)
 
@@ -244,12 +294,30 @@ private fun CompletedWorkoutContent(
             )
         }
 
-        // HR Zone Distribution (if HR data available)
-        if (log.avgHeartRate != null && userProfile?.maxHeartRate != null) {
+        // Heart Rate Zone Distribution
+        if (log.hrZoneDistribution != null && log.hrZoneDistribution.isNotEmpty()) {
+            ZoneAnalysisCard(
+                title = "Heart Rate Zones",
+                distribution = log.hrZoneDistribution,
+                avgValue = log.avgHeartRate?.let { "$it bpm" } ?: "N/A",
+                avgLabel = "Average HR"
+            )
+        } else if (log.avgHeartRate != null && userProfile?.maxHeartRate != null) {
+            // Fallback for older workouts
             HrZoneDistributionCard(
                 avgHeartRate = log.avgHeartRate,
                 maxHeartRate = userProfile.maxHeartRate,
                 viewModel = viewModel
+            )
+        }
+
+        // Power Zone Distribution
+        if (log.powerZoneDistribution != null && log.powerZoneDistribution.isNotEmpty()) {
+            ZoneAnalysisCard(
+                title = "Power Zones",
+                distribution = log.powerZoneDistribution,
+                avgValue = log.avgPowerWatts?.let { "$it W" } ?: "N/A",
+                avgLabel = "Average Power"
             )
         }
 
@@ -258,10 +326,63 @@ private fun CompletedWorkoutContent(
 }
 
 @Composable
+private fun ZoneAnalysisCard(
+    title: String,
+    distribution: Map<String, Int>,
+    avgValue: String,
+    avgLabel: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = avgValue,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = avgLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+            }
+            
+            ZoneDistributionChart(distribution = distribution)
+        }
+    }
+}
+
+@Composable
 private fun WorkoutHeader(
     workoutType: WorkoutType,
     date: String,
     tss: Int,
+    intensityLabel: String? = null,
+    tagColor: IntensityTagColor? = null,
     modifier: Modifier = Modifier
 ) {
     val color = workoutType.toColor()
@@ -299,6 +420,10 @@ private fun WorkoutHeader(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (intensityLabel != null && tagColor != null) {
+                IntensityTag(label = intensityLabel, colorType = tagColor)
+            }
             
             // TSS Badge
             Box(
@@ -737,10 +862,11 @@ private fun ErrorState(
 
 // Helper functions
 
+@Composable
 private fun getWorkoutIcon(type: WorkoutType): ImageVector {
     return when (type) {
         WorkoutType.RUN -> Icons.AutoMirrored.Filled.DirectionsRun
-        WorkoutType.BIKE -> Icons.Default.PedalBike
+        WorkoutType.BIKE -> Icons.AutoMirrored.Filled.DirectionsBike
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
@@ -779,13 +905,16 @@ private fun formatStrengthFocus(focus: StrengthFocus): String {
         StrengthFocus.FULL_BODY -> "Full Body"
         StrengthFocus.UPPER -> "Upper Body"
         StrengthFocus.LOWER -> "Lower Body"
+        StrengthFocus.HEAVY -> "Heavy Strength"
+        StrengthFocus.STABILITY -> "Stability & Core"
     }
 }
 
 private fun formatIntensity(intensity: Intensity): String {
     return when (intensity) {
-        Intensity.LIGHT -> "Light"
-        Intensity.HEAVY -> "Heavy"
+        Intensity.LIGHT, Intensity.LOW -> "Light"
+        Intensity.HEAVY, Intensity.HIGH -> "Heavy"
+        Intensity.MODERATE -> "Moderate"
     }
 }
 

@@ -5,6 +5,8 @@ import androidx.room.Room
 import com.tripath.data.local.database.AppDatabase
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.RawWorkoutDataDao
+import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
@@ -14,6 +16,9 @@ import com.tripath.data.local.database.migrations.MIGRATION_3_4
 import com.tripath.data.local.database.migrations.MIGRATION_4_5
 import com.tripath.data.local.database.migrations.MIGRATION_5_6
 import com.tripath.data.local.database.migrations.MIGRATION_6_7
+import com.tripath.data.local.database.migrations.MIGRATION_7_8
+import com.tripath.data.local.database.migrations.MIGRATION_8_9
+import com.tripath.data.local.database.migrations.MIGRATION_9_10
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -47,7 +52,10 @@ object DatabaseModule {
                 MIGRATION_3_4,
                 MIGRATION_4_5,
                 MIGRATION_5_6,
-                MIGRATION_6_7
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+                MIGRATION_8_9,
+                MIGRATION_9_10
             )
             .build()
     }
@@ -66,6 +74,12 @@ object DatabaseModule {
 
     @Provides
     @Singleton
+    fun provideRawWorkoutDataDao(database: AppDatabase): RawWorkoutDataDao {
+        return database.rawWorkoutDataDao()
+    }
+
+    @Provides
+    @Singleton
     fun provideSpecialPeriodDao(database: AppDatabase): SpecialPeriodDao {
         return database.specialPeriodDao()
     }
@@ -80,6 +94,12 @@ object DatabaseModule {
     @Singleton
     fun provideDayTemplateDao(database: AppDatabase): DayTemplateDao {
         return database.dayTemplateDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideSleepLogDao(database: AppDatabase): SleepLogDao {
+        return database.sleepLogDao()
     }
 }
 

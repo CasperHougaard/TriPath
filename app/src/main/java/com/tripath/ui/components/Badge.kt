@@ -5,6 +5,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Pool
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -12,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -21,7 +29,20 @@ import com.tripath.ui.theme.TriPathTheme
 import com.tripath.ui.theme.toColor
 
 /**
- * Sport badge component displaying workout type with color coding.
+ * Get the appropriate icon for each workout type.
+ */
+fun WorkoutType.toIcon(): ImageVector {
+    return when (this) {
+        WorkoutType.RUN -> Icons.AutoMirrored.Filled.DirectionsRun
+        WorkoutType.BIKE -> Icons.AutoMirrored.Filled.DirectionsBike
+        WorkoutType.SWIM -> Icons.Default.Pool
+        WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
+        WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
+    }
+}
+
+/**
+ * Sport badge component displaying workout type with icon and color coding.
  * Used in workout cards, calendar views, and charts for quick type identification.
  *
  * @param workoutType Type of workout to display
@@ -36,6 +57,8 @@ fun WorkoutBadge(
 ) {
     val badgeSize = size.dp
     val color = workoutType.toColor()
+    val icon = workoutType.toIcon()
+    val iconSize = (size * 0.55f).dp
     
     Box(
         modifier = modifier
@@ -44,17 +67,11 @@ fun WorkoutBadge(
             .background(color),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = when (workoutType) {
-                WorkoutType.SWIM -> "S"
-                WorkoutType.BIKE -> "B"
-                WorkoutType.RUN -> "R"
-                WorkoutType.STRENGTH -> "W" // W for Weights
-                WorkoutType.OTHER -> "O"
-            },
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
+        Icon(
+            imageVector = icon,
+            contentDescription = workoutType.name,
+            tint = Color.White,
+            modifier = Modifier.size(iconSize)
         )
     }
 }

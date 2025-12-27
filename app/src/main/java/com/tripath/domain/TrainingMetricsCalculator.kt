@@ -181,5 +181,19 @@ object TrainingMetricsCalculator {
 
         return PerformanceMetrics(ctl = ctl, atl = atl, tsb = tsb)
     }
+
+    /**
+     * Calculates a safe maximum weekly TSS based on current fitness (CTL).
+     * This represents a safe progressive overload (approx 15% bump over current 
+     * daily load capacity extrapolated to a week).
+     * 
+     * @param currentCtl The current Chronic Training Load (Fitness)
+     * @return Safe weekly TSS limit as an integer
+     */
+    fun calculateSafeWeeklyTSS(currentCtl: Double): Int {
+        // Safe daily load capacity is approx Current CTL * 1.15
+        val safeDailyLoad = if (currentCtl < 10) 40.0 else currentCtl * 1.15
+        return (safeDailyLoad * 7).toInt()
+    }
 }
 

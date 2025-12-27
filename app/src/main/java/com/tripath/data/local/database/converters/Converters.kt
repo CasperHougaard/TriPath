@@ -4,12 +4,25 @@ import androidx.room.TypeConverter
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.time.LocalDate
 
 /**
  * Room TypeConverters for converting complex types to/from database-compatible types.
  */
 class Converters {
+
+    // Map<String, Int> converters for zone distributions
+    @TypeConverter
+    fun fromZoneDistribution(distribution: Map<String, Int>?): String? {
+        return distribution?.let { Json.encodeToString(it) }
+    }
+
+    @TypeConverter
+    fun toZoneDistribution(json: String?): Map<String, Int>? {
+        return json?.let { Json.decodeFromString(it) }
+    }
 
     // LocalDate converters - uses epoch days for storage
     @TypeConverter

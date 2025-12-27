@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.*
@@ -30,6 +31,7 @@ import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.model.WorkoutType
+import com.tripath.ui.navigation.Screen
 import com.tripath.ui.planner.AddWorkoutBottomSheet
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.toColor
@@ -183,6 +185,9 @@ fun DayDetailScreen(
                     items(uiState.plannedActivities) { activity ->
                         PlannedActivityCard(
                             activity = activity,
+                            onClick = {
+                                navController.navigate(Screen.WorkoutDetail.createRoute(activity.id, true))
+                            },
                             onEdit = {
                                 editingActivity = activity
                                 showAddEditSheet = true
@@ -204,7 +209,12 @@ fun DayDetailScreen(
                     }
 
                     items(uiState.completedWorkouts) { log ->
-                        CompletedWorkoutCard(log = log)
+                        CompletedWorkoutCard(
+                            log = log,
+                            onClick = {
+                                navController.navigate(Screen.WorkoutDetail.createRoute(log.connectId, false))
+                            }
+                        )
                     }
                 }
             }
@@ -215,6 +225,7 @@ fun DayDetailScreen(
         AddWorkoutBottomSheet(
             selectedDate = date,
             initialWorkout = editingActivity,
+            userProfile = uiState.userProfile,
             onDismiss = { showAddEditSheet = false },
             onSave = { updatedActivity ->
                 if (editingActivity != null) {
@@ -390,13 +401,14 @@ fun TemplateManagementDialog(
 @Composable
 fun PlannedActivityCard(
     activity: TrainingPlan,
+    onClick: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onEdit() },
+            .clickable { onClick() },
         shape = RoundedCornerShape(Spacing.md),
         colors = CardDefaults.cardColors(
             containerColor = activity.type.toColor().copy(alpha = 0.15f)
@@ -452,6 +464,18 @@ fun PlannedActivityCard(
                 }
             }
 
+            IconButton(
+                onClick = {
+                    onEdit()
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit",
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                )
+            }
+            
             IconButton(onClick = onDelete) {
                 Icon(
                     imageVector = Icons.Default.Delete,
@@ -464,9 +488,14 @@ fun PlannedActivityCard(
 }
 
 @Composable
-fun CompletedWorkoutCard(log: WorkoutLog) {
+fun CompletedWorkoutCard(
+    log: WorkoutLog,
+    onClick: () -> Unit
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         shape = RoundedCornerShape(Spacing.md),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
@@ -536,10 +565,11 @@ fun CompletedWorkoutCard(log: WorkoutLog) {
     }
 }
 
+@Composable
 private fun WorkoutType.toIcon(): ImageVector {
     return when (this) {
         WorkoutType.RUN -> Icons.AutoMirrored.Filled.DirectionsRun
-        WorkoutType.BIKE -> Icons.Default.PedalBike
+        WorkoutType.BIKE -> Icons.AutoMirrored.Filled.DirectionsBike
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk

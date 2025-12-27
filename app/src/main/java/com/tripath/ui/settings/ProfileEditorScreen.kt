@@ -11,14 +11,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -37,7 +40,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -65,6 +70,8 @@ fun ProfileEditorScreen(
     var maxHeartRate by remember { mutableStateOf("") }
     var lthr by remember { mutableStateOf("") }
     var cssTimeString by remember { mutableStateOf("") }
+    var thresholdRunPaceString by remember { mutableStateOf("") }
+    var tenKmTime by remember { mutableStateOf("") }
     var goalDate by remember { mutableStateOf<LocalDate?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
 
@@ -75,7 +82,15 @@ fun ProfileEditorScreen(
             maxHeartRate = profile.maxHeartRate?.toString() ?: ""
             lthr = profile.lthr?.toString() ?: ""
             cssTimeString = viewModel.formatSecondsToCssTime(profile.cssSecondsper100m) ?: ""
+            thresholdRunPaceString = viewModel.formatSecondsToCssTime(profile.thresholdRunPace) ?: ""
             goalDate = profile.goalDate
+        }
+    }
+
+    // Sync ViewModel calculated pace to local state
+    LaunchedEffect(uiState.calculatedThresholdPace) {
+        uiState.calculatedThresholdPace?.let {
+            thresholdRunPaceString = it
         }
     }
 
@@ -101,7 +116,7 @@ fun ProfileEditorScreen(
                 title = { Text("Edit Profile") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -118,6 +133,66 @@ fun ProfileEditorScreen(
             verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Spacer(modifier = Modifier.height(Spacing.md))
+
+            Text(
+                text = "Run Threshold Setup",
+                style = MaterialTheme.typography.titleLarge
+            )
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(Spacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.md)
+                ) {
+                    Text(
+                        text = "10km Race Time Helper",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Enter your recent 10km race or time trial result to estimate your threshold pace.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = tenKmTime,
+                        onValueChange = { 
+                            tenKmTime = it
+                            viewModel.updateTenKmTime(it)
+                        },
+                        label = { Text("10km Time (MM:SS or HH:MM:SS)") },
+                        placeholder = { Text("e.g. 45:00") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    if (uiState.calculatedThresholdPace != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Estimated Threshold Pace:",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = "${uiState.calculatedThresholdPace}/km",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.md))
 
             Text(
                 text = "Physiological Metrics",
@@ -208,6 +283,30 @@ fun ProfileEditorScreen(
                         )
                     }
                 }
+            )
+
+            // Threshold Run Pace field
+            val thresholdRunPaceError = thresholdRunPaceString.isNotEmpty() && 
+                thresholdRunPaceString.isNotBlank() && 
+                viewModel.parseCssTimeToSeconds(thresholdRunPaceString) == null
+            OutlinedTextField(
+                value = thresholdRunPaceString,
+                onValueChange = { thresholdRunPaceString = it },
+                label = { Text("Threshold Run Pace") },
+                placeholder = { Text("5:30") },
+                supportingText = {
+                    if (thresholdRunPaceError) {
+                        Text(
+                            "Format: MM:SS (e.g., 5:30 for 5 minutes 30 seconds per km)",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        Text("Running pace at threshold (MM:SS per km)")
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                isError = thresholdRunPaceError
             )
 
             // CSS (Swim) field - MM:SS format
@@ -303,6 +402,7 @@ fun ProfileEditorScreen(
                         maxHeartRate = maxHr,
                         lthr = lthrValue,
                         cssTimeString = cssTimeString.takeIf { it.isNotBlank() },
+                        thresholdRunPaceString = thresholdRunPaceString.takeIf { it.isNotBlank() },
                         goalDate = goalDate
                     )
                 },

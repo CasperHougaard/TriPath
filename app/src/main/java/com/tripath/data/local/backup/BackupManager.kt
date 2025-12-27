@@ -1,6 +1,9 @@
 package com.tripath.data.local.backup
 
 import com.tripath.data.local.database.AppDatabase
+import com.tripath.data.local.database.entities.DayTemplate
+import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.local.database.entities.TrainingPlan
@@ -37,12 +40,14 @@ class BackupManager @Inject constructor(
 
     /**
      * Export all data to a JSON string.
-     * Includes training plans, workout logs, special periods, and user profile.
+     * Includes training plans, workout logs, special periods, sleep logs, and user profile.
      */
     suspend fun exportToJson(): String {
         return withContext(Dispatchers.IO) {
             val trainingPlans = repository.getAllTrainingPlansOnce()
             val workoutLogs = repository.getAllWorkoutLogsOnce()
+            val rawWorkoutData = repository.getAllRawWorkoutDataOnce()
+            val sleepLogs = repository.getAllSleepLogsOnce()
             val specialPeriods = repository.getAllSpecialPeriodsOnce()
             val userProfile = repository.getUserProfileOnce()
 
@@ -51,6 +56,8 @@ class BackupManager @Inject constructor(
                 timestamp = System.currentTimeMillis(),
                 trainingPlans = trainingPlans.map { it.toDto() },
                 workoutLogs = workoutLogs.map { it.toDto() },
+                rawWorkoutData = rawWorkoutData.map { it.toDto() },
+                sleepLogs = sleepLogs.map { it.toDto() },
                 specialPeriods = specialPeriods.map { it.toDto() },
                 userProfile = userProfile?.toDto()
             )
@@ -91,6 +98,14 @@ class BackupManager @Inject constructor(
                     val workoutLogs = backupData.workoutLogs.map { it.toEntity() }
                     repository.insertWorkoutLogs(workoutLogs)
 
+                    // Import raw workout data
+                    val rawWorkoutData = backupData.rawWorkoutData.map { it.toEntity() }
+                    repository.insertRawWorkoutData(rawWorkoutData)
+
+                    // Import sleep logs
+                    val sleepLogs = backupData.sleepLogs.map { it.toEntity() }
+                    repository.insertSleepLogs(sleepLogs)
+
                     // Import special periods
                     val specialPeriods = backupData.specialPeriods.map { it.toEntity() }
                     repository.insertSpecialPeriods(specialPeriods)
@@ -103,6 +118,8 @@ class BackupManager @Inject constructor(
                     ImportSummary(
                         trainingPlansImported = trainingPlans.size,
                         workoutLogsImported = workoutLogs.size,
+                        rawWorkoutDataImported = rawWorkoutData.size,
+                        sleepLogsImported = sleepLogs.size,
                         specialPeriodsImported = specialPeriods.size,
                         profileImported = backupData.userProfile != null
                     )
@@ -128,7 +145,7 @@ class BackupManager @Inject constructor(
     }
 
     companion object {
-        const val BACKUP_VERSION = 1
+        const val BACKUP_VERSION = 3
     }
 }
 
@@ -138,6 +155,8 @@ class BackupManager @Inject constructor(
 data class ImportSummary(
     val trainingPlansImported: Int,
     val workoutLogsImported: Int,
+    val rawWorkoutDataImported: Int,
+    val sleepLogsImported: Int,
     val specialPeriodsImported: Int,
     val profileImported: Boolean
 )
@@ -149,10 +168,12 @@ data class ImportSummary(
  */
 @Serializable
 data class AppBackupData(
-    val version: Int = 1,
+    val version: Int = 3,
     val timestamp: Long,
     val trainingPlans: List<TrainingPlanDto>,
     val workoutLogs: List<WorkoutLogDto>,
+    val rawWorkoutData: List<RawWorkoutDataDto> = emptyList(),
+    val sleepLogs: List<SleepLogDto> = emptyList(),
     val specialPeriods: List<SpecialPeriodDto> = emptyList(),
     val userProfile: UserProfileDto?
 )
@@ -189,7 +210,47 @@ data class WorkoutLogDto(
     val distanceMeters: Double?,
     val avgSpeedKmh: Double?,
     val avgPowerWatts: Int?,
-    val steps: Int?
+    val steps: Int?,
+    val hrZoneDistribution: Map<String, Int>? = null,
+    val powerZoneDistribution: Map<String, Int>? = null
+)
+
+/**
+ * DTO for RawWorkoutData serialization.
+ */
+@Serializable
+data class RawWorkoutDataDto(
+    val connectId: String,
+    val rawExerciseType: Int,
+    val startTimeMillis: Long,
+    val endTimeMillis: Long,
+    val hrSamplesJson: String?,
+    val powerSamplesJson: String?,
+    val rawCalories: Int?,
+    val rawDistanceMeters: Double?,
+    val rawSteps: Int?,
+    val routeJson: String? = null,
+    val importedAt: Long
+)
+
+/**
+ * DTO for SleepLog serialization.
+ */
+@Serializable
+data class SleepLogDto(
+    val connectId: String,
+    @Serializable(with = LocalDateSerializer::class)
+    val date: LocalDate,
+    val startTimeMillis: Long,
+    val endTimeMillis: Long,
+    val durationMinutes: Int,
+    val title: String?,
+    val stagesJson: String?,
+    val deepSleepMinutes: Int?,
+    val lightSleepMinutes: Int?,
+    val remSleepMinutes: Int?,
+    val awakeMinutes: Int?,
+    val importedAt: Long
 )
 
 /**
@@ -222,7 +283,8 @@ data class UserProfileDto(
     val goalDate: LocalDate?,
     val weeklyHoursGoal: Float?,
     val lthr: Int?,
-    val cssSecondsper100m: Int?
+    val cssSecondsper100m: Int?,
+    val thresholdRunPace: Int?
 )
 
 // ==================== Entity <-> DTO Conversion Extensions ====================
@@ -260,7 +322,9 @@ private fun WorkoutLog.toDto() = WorkoutLogDto(
     distanceMeters = distanceMeters,
     avgSpeedKmh = avgSpeedKmh,
     avgPowerWatts = avgPowerWatts,
-    steps = steps
+    steps = steps,
+    hrZoneDistribution = hrZoneDistribution,
+    powerZoneDistribution = powerZoneDistribution
 )
 
 private fun WorkoutLogDto.toEntity() = WorkoutLog(
@@ -274,7 +338,67 @@ private fun WorkoutLogDto.toEntity() = WorkoutLog(
     distanceMeters = distanceMeters,
     avgSpeedKmh = avgSpeedKmh,
     avgPowerWatts = avgPowerWatts,
-    steps = steps
+    steps = steps,
+    hrZoneDistribution = hrZoneDistribution,
+    powerZoneDistribution = powerZoneDistribution
+)
+
+private fun RawWorkoutData.toDto() = RawWorkoutDataDto(
+    connectId = connectId,
+    rawExerciseType = rawExerciseType,
+    startTimeMillis = startTimeMillis,
+    endTimeMillis = endTimeMillis,
+    hrSamplesJson = hrSamplesJson,
+    powerSamplesJson = powerSamplesJson,
+    rawCalories = rawCalories,
+    rawDistanceMeters = rawDistanceMeters,
+    rawSteps = rawSteps,
+    routeJson = routeJson,
+    importedAt = importedAt
+)
+
+private fun RawWorkoutDataDto.toEntity() = RawWorkoutData(
+    connectId = connectId,
+    rawExerciseType = rawExerciseType,
+    startTimeMillis = startTimeMillis,
+    endTimeMillis = endTimeMillis,
+    hrSamplesJson = hrSamplesJson,
+    powerSamplesJson = powerSamplesJson,
+    rawCalories = rawCalories,
+    rawDistanceMeters = rawDistanceMeters,
+    rawSteps = rawSteps,
+    routeJson = routeJson,
+    importedAt = importedAt
+)
+
+private fun SleepLog.toDto() = SleepLogDto(
+    connectId = connectId,
+    date = date,
+    startTimeMillis = startTimeMillis,
+    endTimeMillis = endTimeMillis,
+    durationMinutes = durationMinutes,
+    title = title,
+    stagesJson = stagesJson,
+    deepSleepMinutes = deepSleepMinutes,
+    lightSleepMinutes = lightSleepMinutes,
+    remSleepMinutes = remSleepMinutes,
+    awakeMinutes = awakeMinutes,
+    importedAt = importedAt
+)
+
+private fun SleepLogDto.toEntity() = SleepLog(
+    connectId = connectId,
+    date = date,
+    startTimeMillis = startTimeMillis,
+    endTimeMillis = endTimeMillis,
+    durationMinutes = durationMinutes,
+    title = title,
+    stagesJson = stagesJson,
+    deepSleepMinutes = deepSleepMinutes,
+    lightSleepMinutes = lightSleepMinutes,
+    remSleepMinutes = remSleepMinutes,
+    awakeMinutes = awakeMinutes,
+    importedAt = importedAt
 )
 
 private fun SpecialPeriod.toDto() = SpecialPeriodDto(
@@ -302,7 +426,8 @@ private fun UserProfile.toDto() = UserProfileDto(
     goalDate = goalDate,
     weeklyHoursGoal = weeklyHoursGoal,
     lthr = lthr,
-    cssSecondsper100m = cssSecondsper100m
+    cssSecondsper100m = cssSecondsper100m,
+    thresholdRunPace = thresholdRunPace
 )
 
 private fun UserProfileDto.toEntity() = UserProfile(
@@ -314,6 +439,7 @@ private fun UserProfileDto.toEntity() = UserProfile(
     goalDate = goalDate,
     weeklyHoursGoal = weeklyHoursGoal,
     lthr = lthr,
-    cssSecondsper100m = cssSecondsper100m
+    cssSecondsper100m = cssSecondsper100m,
+    thresholdRunPace = thresholdRunPace
 )
 

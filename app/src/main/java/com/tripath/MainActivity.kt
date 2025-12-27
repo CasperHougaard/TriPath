@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
                 val windowInsetsController = WindowCompat.getInsetsController(window, view)
                 
                 // Set navigation bar color to white
+                @Suppress("DEPRECATION")
                 window.navigationBarColor = android.graphics.Color.WHITE
                 
                 // Enable light navigation bar (dark icons on white background)

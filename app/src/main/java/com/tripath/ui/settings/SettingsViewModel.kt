@@ -8,7 +8,8 @@ import com.tripath.data.local.backup.ImportSummary
 import com.tripath.data.model.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.healthconnect.HealthConnectManager
-import com.tripath.data.local.healthconnect.ResyncResult
+import com.tripath.data.local.healthconnect.ReprocessResult
+import com.tripath.data.local.healthconnect.SleepSyncResult
 import com.tripath.data.local.healthconnect.SyncResult
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
@@ -52,7 +53,9 @@ data class SettingsUiState(
     val userProfile: UserProfile? = null,
     val isLoadingProfile: Boolean = false,
     val profileSaveSuccess: Boolean = false,
-    val profileSaveError: String? = null
+    val profileSaveError: String? = null,
+    val tenKmTime: String = "",
+    val calculatedThresholdPace: String? = null
 )
 
 @HiltViewModel
@@ -148,7 +151,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Sync workouts from Health Connect.
+     * Sync workouts and sleep from Health Connect.
      */
     fun syncHealthConnect() {
         viewModelScope.launch {
@@ -161,46 +164,72 @@ class SettingsViewModel @Inject constructor(
                 lastSyncDetails = null
             )
 
-            val result = healthConnectManager.syncWorkouts(daysToLookBack = syncDays)
+            // Sync workouts
+            val workoutResult = healthConnectManager.syncWorkouts(daysToLookBack = syncDays)
+            
+            // Sync sleep data
+            val sleepResult = healthConnectManager.syncSleep(daysToLookBack = syncDays)
 
-            result.fold(
+            // Build combined result message
+            val message = buildSyncResultMessage(workoutResult, sleepResult, syncDays)
+            val overallSuccess = workoutResult.isSuccess || sleepResult.isSuccess
+            
+            _uiState.value = _uiState.value.copy(
+                isSyncing = false,
+                lastSyncResult = message,
+                syncSuccess = overallSuccess,
+                lastSyncDetails = workoutResult.getOrNull()
+            )
+        }
+    }
+    
+    /**
+     * Build a combined sync result message from workout and sleep sync results.
+     */
+    private fun buildSyncResultMessage(
+        workoutResult: Result<SyncResult>,
+        sleepResult: Result<SleepSyncResult>,
+        syncDays: Int
+    ): String {
+        val periodLabel = getSyncPeriodLabel(syncDays)
+        
+        return buildString {
+            // Workout results
+            workoutResult.fold(
                 onSuccess = { syncResult ->
-                    val periodLabel = getSyncPeriodLabel(syncDays)
-                    val message = buildString {
-                        append("Found ${syncResult.foundInHealthConnect} in Health Connect. ")
-                        if (syncResult.newlyImported > 0) {
-                            append("Imported ${syncResult.newlyImported} new. ")
-                        }
+                    if (syncResult.foundInHealthConnect > 0) {
+                        append("Workouts: ${syncResult.newlyImported} new")
                         if (syncResult.alreadySynced > 0) {
-                            append("${syncResult.alreadySynced} already synced. ")
+                            append(", ${syncResult.alreadySynced} existing")
                         }
-                        if (syncResult.skippedUnsupported > 0) {
-                            append("${syncResult.skippedUnsupported} unsupported type.")
+                        if (syncResult.routeBackfilled > 0) {
+                            append(", ${syncResult.routeBackfilled} routes added")
                         }
-                        if (syncResult.foundInHealthConnect == 0) {
-                            clear()
-                            append("No workouts found in Health Connect for $periodLabel.")
-                        }
+                        append(". ")
+                    } else {
+                        append("No workouts found. ")
                     }
-                    _uiState.value = _uiState.value.copy(
-                        isSyncing = false,
-                        lastSyncResult = message,
-                        syncSuccess = true,
-                        lastSyncDetails = syncResult
-                    )
                 },
                 onFailure = { error ->
-                    val message = when (error) {
-                        is SecurityException -> "Permissions not granted"
-                        is IllegalStateException -> "Health Connect not available"
-                        else -> "Sync failed: ${error.message}"
+                    append("Workout sync failed: ${error.message}. ")
+                }
+            )
+            
+            // Sleep results
+            sleepResult.fold(
+                onSuccess = { syncResult ->
+                    if (syncResult.foundInHealthConnect > 0) {
+                        append("Sleep: ${syncResult.newlyImported} new")
+                        if (syncResult.alreadySynced > 0) {
+                            append(", ${syncResult.alreadySynced} existing")
+                        }
+                        append(".")
+                    } else {
+                        append("No sleep data found.")
                     }
-                    _uiState.value = _uiState.value.copy(
-                        isSyncing = false,
-                        lastSyncResult = message,
-                        syncSuccess = false,
-                        lastSyncDetails = null
-                    )
+                },
+                onFailure = { error ->
+                    append("Sleep sync failed: ${error.message}")
                 }
             )
         }
@@ -237,41 +266,32 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Resync workout history to re-classify existing workouts.
-     * Re-fetches workouts from Health Connect and updates existing records if their type has changed.
+     * Reprocess all workouts in the database using the latest UserProfile settings.
+     * Uses local RawWorkoutData, so it doesn't require Health Connect permissions.
      */
-    fun resyncHistory() {
+    fun reprocessWorkouts() {
         viewModelScope.launch {
-            val syncDays = _uiState.value.syncDaysBack
-            
             _uiState.value = _uiState.value.copy(
                 isSyncing = true,
                 lastSyncResult = null,
                 syncSuccess = null
             )
 
-            val result = healthConnectManager.resyncHistory(daysToLookBack = syncDays)
+            val result = healthConnectManager.reprocessAllWorkouts()
 
             result.fold(
-                onSuccess = { resyncResult ->
-                    val periodLabel = getSyncPeriodLabel(syncDays)
+                onSuccess = { reprocessResult ->
                     val message = buildString {
-                        append("Found ${resyncResult.workoutsFound} workouts. ")
-                        if (resyncResult.updated > 0) {
-                            append("Updated ${resyncResult.updated}. ")
+                        append("Found ${reprocessResult.foundInDatabase} raw workouts. ")
+                        if (reprocessResult.processed > 0) {
+                            append("Reprocessed ${reprocessResult.processed}. ")
                         }
-                        if (resyncResult.unchanged > 0) {
-                            append("${resyncResult.unchanged} unchanged. ")
+                        if (reprocessResult.errors > 0) {
+                            append("${reprocessResult.errors} errors.")
                         }
-                        if (resyncResult.new > 0) {
-                            append("${resyncResult.new} new. ")
-                        }
-                        if (resyncResult.errors > 0) {
-                            append("${resyncResult.errors} errors.")
-                        }
-                        if (resyncResult.workoutsFound == 0) {
+                        if (reprocessResult.foundInDatabase == 0) {
                             clear()
-                            append("No workouts found in Health Connect for $periodLabel.")
+                            append("No raw workouts found to reprocess.")
                         }
                     }
                     _uiState.value = _uiState.value.copy(
@@ -283,14 +303,9 @@ class SettingsViewModel @Inject constructor(
                     loadSyncedWorkouts()
                 },
                 onFailure = { error ->
-                    val message = when (error) {
-                        is SecurityException -> "Permissions not granted"
-                        is IllegalStateException -> "Health Connect not available"
-                        else -> "Resync failed: ${error.message}"
-                    }
                     _uiState.value = _uiState.value.copy(
                         isSyncing = false,
-                        lastSyncResult = message,
+                        lastSyncResult = "Reprocess failed: ${error.message}",
                         syncSuccess = false
                     )
                 }
@@ -425,6 +440,49 @@ class SettingsViewModel @Inject constructor(
     }
     
     /**
+     * Update 10km time and calculate threshold pace.
+     * @param time 10km race time in MM:SS or HH:MM:SS format
+     */
+    fun updateTenKmTime(time: String) {
+        val totalSeconds = parseTimeToSeconds(time)
+        val calculatedPace = if (totalSeconds != null && totalSeconds > 0) {
+            val pacePerKm = totalSeconds / 10
+            formatSecondsToCssTime(pacePerKm)
+        } else {
+            null
+        }
+
+        _uiState.value = _uiState.value.copy(
+            tenKmTime = time,
+            calculatedThresholdPace = calculatedPace
+        )
+    }
+
+    private fun parseTimeToSeconds(timeString: String): Int? {
+        if (timeString.isBlank()) return null
+        
+        val parts = timeString.split(":")
+        return try {
+            when (parts.size) {
+                2 -> { // MM:SS
+                    val minutes = parts[0].toInt()
+                    val seconds = parts[1].toInt()
+                    (minutes * 60) + seconds
+                }
+                3 -> { // HH:MM:SS
+                    val hours = parts[0].toInt()
+                    val minutes = parts[1].toInt()
+                    val seconds = parts[2].toInt()
+                    (hours * 3600) + (minutes * 60) + seconds
+                }
+                else -> null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
      * Save user profile with the provided values.
      */
     fun saveUserProfile(
@@ -432,6 +490,7 @@ class SettingsViewModel @Inject constructor(
         maxHeartRate: Int?,
         lthr: Int?,
         cssTimeString: String?,
+        thresholdRunPaceString: String?,
         goalDate: java.time.LocalDate?
     ) {
         viewModelScope.launch {
@@ -451,6 +510,12 @@ class SettingsViewModel @Inject constructor(
             if (cssTimeString != null && cssTimeString.isNotBlank() && cssSeconds == null) {
                 validationErrors.add("CSS must be in MM:SS format (e.g., 1:45)")
             }
+
+            // Validate and convert Threshold Run Pace string
+            val thresholdRunPace = parseCssTimeToSeconds(thresholdRunPaceString)
+            if (thresholdRunPaceString != null && thresholdRunPaceString.isNotBlank() && thresholdRunPace == null) {
+                validationErrors.add("Threshold Run Pace must be in MM:SS format (e.g., 5:30)")
+            }
             
             if (validationErrors.isNotEmpty()) {
                 _uiState.value = _uiState.value.copy(
@@ -466,6 +531,7 @@ class SettingsViewModel @Inject constructor(
                 maxHeartRate = maxHeartRate,
                 lthr = lthr,
                 cssSecondsper100m = cssSeconds,
+                thresholdRunPace = thresholdRunPace,
                 goalDate = goalDate,
                 // Preserve other fields from current profile
                 defaultSwimTSS = currentProfile?.defaultSwimTSS,

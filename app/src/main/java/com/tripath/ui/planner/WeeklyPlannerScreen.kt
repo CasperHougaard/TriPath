@@ -5,14 +5,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.DirectionsBike
 import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Pool
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -74,8 +78,7 @@ fun WeeklyPlannerScreen(
                 )
 
                 MatrixNavigationHeader(
-                    startDate = uiState.startDate,
-                    weekCount = uiState.weeklyRows.size,
+                    currentMonth = uiState.currentMonth,
                     onPrevMonth = { viewModel.previousMonth() },
                     onNextMonth = { viewModel.nextMonth() },
                     onGoToCurrent = { viewModel.goToCurrent() }
@@ -146,6 +149,9 @@ fun WeeklyPlannerScreen(
                         .padding(end = 80.dp), // Match summary panel width
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
+                    // Week label placeholder
+                    Spacer(modifier = Modifier.width(24.dp))
+                    
                     val days = listOf("M", "T", "W", "T", "F", "S", "S")
                     days.forEach { day ->
                         Text(
@@ -160,16 +166,6 @@ fun WeeklyPlannerScreen(
 
                 uiState.weeklyRows.forEachIndexed { index, weekRow ->
                     val isExpanded = expandedWeeks.contains(index)
-                    
-                    if (weekRow.monthLabel != null) {
-                        Text(
-                            text = weekRow.monthLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = Spacing.sm, bottom = 2.dp, start = 2.dp)
-                        )
-                    }
 
                     WeeklyRow(
                         weekRow = weekRow,
@@ -178,8 +174,8 @@ fun WeeklyPlannerScreen(
                         onDayClick = { date -> 
                             navController.navigate(Screen.DayDetail.createRoute(date))
                         },
-                        onWorkoutClick = { workoutId ->
-                            navController.navigate(Screen.WorkoutDetail.createRoute(workoutId, true))
+                        onWorkoutClick = { workoutId, isPlanned ->
+                            navController.navigate(Screen.WorkoutDetail.createRoute(workoutId, isPlanned))
                         },
                         onToggleExpand = {
                             expandedWeeks = if (isExpanded) {
@@ -188,7 +184,8 @@ fun WeeklyPlannerScreen(
                                 expandedWeeks + index
                             }
                         },
-                        onCopyWeek = { viewModel.copyWeek(weekRow.weekStart) }
+                        onCopyWeek = { viewModel.copyWeek(weekRow.weekStart) },
+                        weekNumber = weekRow.weekNumber
                     )
                 }
                 
@@ -214,9 +211,10 @@ fun WeeklyRow(
     isExpanded: Boolean,
     includeImported: Boolean,
     onDayClick: (LocalDate) -> Unit,
-    onWorkoutClick: (String) -> Unit,
+    onWorkoutClick: (String, Boolean) -> Unit,
     onToggleExpand: () -> Unit,
     onCopyWeek: () -> Unit,
+    weekNumber: Int,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -226,6 +224,22 @@ fun WeeklyRow(
                 .height(if (isExpanded) 120.dp else 80.dp),
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
         ) {
+            // Week Number Label
+            Box(
+                modifier = Modifier
+                    .width(24.dp)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "W$weekNumber",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+            }
+            
             // 7 Days
             weekRow.days.forEach { day ->
                 DayCell(
@@ -283,7 +297,7 @@ fun DayCell(
     isExpanded: Boolean,
     includeImported: Boolean,
     onClick: () -> Unit,
-    onWorkoutClick: (String) -> Unit,
+    onWorkoutClick: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Calculate total TSS for heatmap (planned + imported if toggle is on)
@@ -341,110 +355,93 @@ fun DayCell(
                     .fillMaxSize()
                     .padding(2.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = if (isExpanded) Arrangement.Top else Arrangement.Center
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
+                // TOP: Day Number
                 val dayLabel = if (day.date.dayOfMonth == 1) {
-                    "${day.date.dayOfMonth} ${day.date.format(DateTimeFormatter.ofPattern("MMM"))}"
+                    "${day.date.dayOfMonth} ${day.date.format(DateTimeFormatter.ofPattern("MMM", java.util.Locale.ENGLISH))}"
                 } else {
                     day.date.dayOfMonth.toString()
                 }
                 
                 Text(
                     text = dayLabel,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(bottom = 1.dp)
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(top = 1.dp)
                 )
                 
-                // Get imported logs that don't match a plan (when toggle is enabled)
-                val importedLogs = if (includeImported) {
-                    day.completedLogs.filter { log ->
-                        !day.workouts.any { plan ->
-                            plan.date == log.date && plan.type == log.type
+                // MIDDLE: Icons for planned events
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    // Get imported logs that don't match a plan (when toggle is enabled)
+                    val importedLogs = if (includeImported) {
+                        day.completedLogs.filter { log ->
+                            !day.workouts.any { plan ->
+                                plan.date == log.date && plan.type == log.type
+                            }
                         }
+                    } else {
+                        emptyList()
                     }
-                } else {
-                    emptyList()
-                }
-                
-                val hasActivities = day.workouts.isNotEmpty() || importedLogs.isNotEmpty()
-                
-                if (hasActivities) {
-                    // Show planned workouts
-                    day.workouts.forEach { workout ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                    
+                    val hasActivities = day.workouts.isNotEmpty() || importedLogs.isNotEmpty()
+                    
+                    if (hasActivities) {
+                        // Show planned workouts
+                        day.workouts.forEach { workout ->
                             Icon(
                                 imageVector = workout.type.toIcon(),
                                 contentDescription = null,
                                 tint = workout.type.toColor(),
-                                modifier = Modifier.size(if (isExpanded) 14.dp else 12.dp)
+                                modifier = Modifier
+                                    .size(if (isExpanded) 16.dp else 14.dp)
                             )
-                            if (isExpanded) {
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Text(
-                                    text = "${workout.durationMinutes}",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            if (day.workouts.size > 1 || importedLogs.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(2.dp))
                             }
                         }
-                    }
-                    
-                    // Show imported logs (with slightly different styling to distinguish)
-                    if (includeImported) {
-                        importedLogs.forEach { log ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
+                        
+                        // Show imported logs (with slightly different styling to distinguish)
+                        if (includeImported) {
+                            importedLogs.forEach { log ->
                                 Icon(
                                     imageVector = log.type.toIcon(),
                                     contentDescription = null,
                                     tint = log.type.toColor().copy(alpha = 0.7f),
-                                    modifier = Modifier.size(if (isExpanded) 12.dp else 10.dp)
+                                    modifier = Modifier
+                                        .size(if (isExpanded) 14.dp else 12.dp)
                                 )
-                                if (isExpanded) {
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Text(
-                                        text = "${log.durationMinutes}",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                        fontWeight = FontWeight.Normal,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
+                                if (importedLogs.size > 1) {
+                                    Spacer(modifier = Modifier.height(2.dp))
                                 }
                             }
                         }
-                    }
-                    
-                    if (!isExpanded) {
-                        val totalDuration = day.workouts.sumOf { it.durationMinutes } + 
-                            if (includeImported) importedLogs.sumOf { it.durationMinutes } else 0
-                        Text(
-                            text = "$totalDuration",
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                            fontWeight = FontWeight.Bold
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(4.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                         )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(4.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-                    )
                 }
+                
+                // BOTTOM: TSS
+                Text(
+                    text = "$totalTSS",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(bottom = 1.dp)
+                )
             }
             
-            // Special Period Icons
+            // Special Period Icons (top-right corner)
             if (day.specialPeriods.isNotEmpty()) {
                 val period = day.specialPeriods.first()
                 Text(
@@ -522,10 +519,11 @@ fun DisciplineDistributionBar(
     }
 }
 
+@Composable
 private fun WorkoutType.toIcon(): ImageVector {
     return when (this) {
         WorkoutType.RUN -> Icons.AutoMirrored.Filled.DirectionsRun
-        WorkoutType.BIKE -> Icons.Default.PedalBike
+        WorkoutType.BIKE -> Icons.AutoMirrored.Filled.DirectionsBike
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
@@ -534,23 +532,14 @@ private fun WorkoutType.toIcon(): ImageVector {
 
 @Composable
 fun MatrixNavigationHeader(
-    startDate: LocalDate,
-    weekCount: Int,
+    currentMonth: LocalDate,
     onPrevMonth: () -> Unit,
     onNextMonth: () -> Unit,
     onGoToCurrent: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val endDate = startDate.plusWeeks(weekCount.toLong()).minusDays(1)
-    val startMonth = startDate.format(DateTimeFormatter.ofPattern("MMMM"))
-    val endMonth = endDate.format(DateTimeFormatter.ofPattern("MMMM"))
-    val year = startDate.year
-    
-    val dateRangeText = if (startMonth == endMonth) {
-        "$startMonth $year"
-    } else {
-        "$startMonth - $endMonth $year"
-    }
+    val monthFormatter = DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.ENGLISH)
+    val dateRangeText = currentMonth.format(monthFormatter)
     
     Row(
         modifier = modifier.fillMaxWidth(),

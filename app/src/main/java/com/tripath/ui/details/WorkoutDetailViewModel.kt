@@ -6,11 +6,13 @@ import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.model.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.data.model.RoutePoint
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
 /**
@@ -21,6 +23,7 @@ data class WorkoutDetailUiState(
     val workoutLog: WorkoutLog? = null,
     val userProfile: UserProfile? = null,
     val linkedPlan: TrainingPlan? = null, // For TSS comparison with completed logs
+    val route: List<RoutePoint>? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
     val isPlanned: Boolean = false
@@ -37,6 +40,8 @@ class WorkoutDetailViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(WorkoutDetailUiState())
     val uiState: StateFlow<WorkoutDetailUiState> = _uiState.asStateFlow()
+    
+    private val json = Json { ignoreUnknownKeys = true }
 
     /**
      * Load workout data based on ID and type
@@ -71,10 +76,21 @@ class WorkoutDetailViewModel @Inject constructor(
                         // Try to find linked plan for TSS comparison
                         val linkedPlan = findLinkedPlan(log)
                         
+                        // Load route data if available
+                        val rawData = repository.getRawWorkoutData(workoutId)
+                        val route = if (rawData?.routeJson != null) {
+                            try {
+                                json.decodeFromString<List<RoutePoint>>(rawData.routeJson)
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } else null
+                        
                         _uiState.value = _uiState.value.copy(
                             workoutLog = log,
                             linkedPlan = linkedPlan,
                             userProfile = profile,
+                            route = route,
                             isLoading = false
                         )
                     } else {
@@ -166,6 +182,15 @@ class WorkoutDetailViewModel @Inject constructor(
         // Currently WorkoutLog doesn't store max HR, only avg HR
         // This is a placeholder for future enhancement
         return null
+    }
+
+    /**
+     * Format seconds into a readable string (e.g., "30m 15s" or "45s")
+     */
+    fun formatZoneTime(seconds: Int): String {
+        val minutes = seconds / 60
+        val remainingSeconds = seconds % 60
+        return if (minutes > 0) "${minutes}m ${remainingSeconds}s" else "${remainingSeconds}s"
     }
 }
 

@@ -30,6 +30,9 @@ class HealthConnectPrivacyPolicyActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         // Set navigation bar to white for visibility in dark theme
+        // Note: navigationBarColor is deprecated in Android 15, but there's no direct replacement
+        // without moving to full edge-to-edge implementation
+        @Suppress("DEPRECATION")
         window.navigationBarColor = android.graphics.Color.WHITE
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
         windowInsetsController.isAppearanceLightNavigationBars = true

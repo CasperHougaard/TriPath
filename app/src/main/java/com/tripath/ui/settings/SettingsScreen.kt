@@ -25,7 +25,10 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -237,7 +240,11 @@ fun SettingsScreen(
                     onConnectClick = {
                         healthConnectPermissionLauncher.launch(viewModel.healthConnectPermissions)
                     },
-                    onSyncClick = { viewModel.syncHealthConnect() }
+                    onSyncClick = { viewModel.syncHealthConnect() },
+                    onReprocessClick = { viewModel.reprocessWorkouts() },
+                    onViewSyncedClick = {
+                        navController?.navigate(com.tripath.ui.navigation.Screen.SyncedExercises.route)
+                    }
                 )
 
                 // Backup Section
@@ -347,6 +354,8 @@ private fun HealthConnectCard(
     onSyncDaysChange: (Int) -> Unit,
     onConnectClick: () -> Unit,
     onSyncClick: () -> Unit,
+    onReprocessClick: () -> Unit,
+    onViewSyncedClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -429,30 +438,59 @@ private fun HealthConnectCard(
                         }
                     }
 
-                    Button(onClick = onSyncClick, modifier = Modifier.fillMaxWidth(), enabled = !isSyncing) {
-                        if (isSyncing) {
-                            CircularProgressIndicator(
-                                modifier = Modifier
-                                    .padding(end = Spacing.sm)
-                                    .size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.Sync,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .padding(end = Spacing.sm)
-                                    .size(16.dp)
-                            )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
+                        Button(
+                            onClick = onSyncClick,
+                            modifier = Modifier.weight(1f),
+                            enabled = !isSyncing
+                        ) {
+                            if (isSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            } else {
+                                Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                            Spacer(modifier = Modifier.width(Spacing.xs))
+                            Text("Sync")
                         }
-                        Text(if (isSyncing) "Syncing..." else "Sync Now")
+                        
+                        OutlinedButton(
+                            onClick = onReprocessClick,
+                            modifier = Modifier.weight(1f),
+                            enabled = !isSyncing
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(Spacing.xs))
+                            Text("Reprocess")
+                        }
+                    }
+
+                    Text(
+                        text = "Reprocess recalculates all workouts using your current FTP and Heart Rate settings without needing Health Connect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = Spacing.xs)
+                    )
+
+                    OutlinedButton(
+                        onClick = onViewSyncedClick,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isSyncing
+                    ) {
+                        Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(Spacing.xs))
+                        Text("View Synced Exercises")
                     }
 
                     if (syncedWorkoutsCount > 0) {
                         Text(
-                            text = "$syncedWorkoutsCount workouts synced",
+                            text = "$syncedWorkoutsCount workouts synced to database",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )

@@ -43,6 +43,12 @@ data class WorkoutLog(
     val avgPowerWatts: Int? = null,
 
     /** Total steps (optional) */
-    val steps: Int? = null
+    val steps: Int? = null,
+
+    /** Time distribution in seconds across HR zones (optional) */
+    val hrZoneDistribution: Map<String, Int>? = null,
+
+    /** Time distribution in seconds across power zones (optional) */
+    val powerZoneDistribution: Map<String, Int>? = null
 )
 

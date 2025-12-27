@@ -7,6 +7,8 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.healthconnect.HealthConnectManager
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.domain.TrainingMetricsCalculator
+import com.tripath.ui.model.FormStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
@@ -42,15 +44,21 @@ data class DashboardUiState(
     val selectedDate: LocalDate = LocalDate.now(),
     val selectedDatePlan: TrainingPlan? = null,
     val selectedDateLogs: List<WorkoutLog> = emptyList(),
-    val isRestDay: Boolean = false, // Relative to selectedDate
-    val restDayMessage: String = "Rest Day", // Relative to selectedDate
-    val isWorkoutCompleted: Boolean = false, // Relative to selectedDate
+    val isRestDay: Boolean = false,
+    val restDayMessage: String = "Rest Day",
+    val isWorkoutCompleted: Boolean = false,
     val hasHealthConnectPermissions: Boolean = false,
     val syncStatus: SyncStatus = SyncStatus.IDLE,
     val syncError: String? = null,
     val lastSyncTimestamp: Long? = null,
     val weekDayStatuses: List<DayStatus> = emptyList(),
-    val greeting: String = "Good Morning"
+    val greeting: String = "Good Morning",
+    // Performance Metrics (Banister Impulse Response Model)
+    val ctl: Double = 0.0,  // Chronic Training Load (Fitness)
+    val atl: Double = 0.0,  // Acute Training Load (Fatigue)
+    val tsb: Double = 0.0,  // Training Stress Balance (Form)
+    val formStatus: FormStatus = FormStatus.OPTIMAL,
+    val weeklyAllowedTSS: Int = 0
 )
 
 @HiltViewModel
@@ -68,6 +76,7 @@ class DashboardViewModel @Inject constructor(
     init {
         checkPermissionsAndSync()
         loadDashboardData()
+        loadPerformanceMetrics()
         updateGreeting()
     }
 
@@ -84,6 +93,39 @@ class DashboardViewModel @Inject constructor(
             else -> "Good Night"
         }
         _uiState.value = _uiState.value.copy(greeting = greeting)
+    }
+
+    /**
+     * Load performance metrics (CTL, ATL, TSB) using the Banister Impulse Response model.
+     */
+    private fun loadPerformanceMetrics() {
+        viewModelScope.launch {
+            try {
+                val allLogs = repository.getAllWorkoutLogsOnce()
+                val metrics = TrainingMetricsCalculator.calculatePerformanceMetrics(
+                    logs = allLogs,
+                    targetDate = LocalDate.now()
+                )
+                
+                val formStatus = when {
+                    metrics.tsb > 5 -> FormStatus.FRESHNESS
+                    metrics.tsb < -30 -> FormStatus.OVERREACHING
+                    else -> FormStatus.OPTIMAL
+                }
+
+                val allowedTss = TrainingMetricsCalculator.calculateSafeWeeklyTSS(metrics.ctl)
+                
+                _uiState.value = _uiState.value.copy(
+                    ctl = metrics.ctl,
+                    atl = metrics.atl,
+                    tsb = metrics.tsb,
+                    formStatus = formStatus,
+                    weeklyAllowedTSS = allowedTss
+                )
+            } catch (e: Exception) {
+                // Silently handle errors - performance metrics are non-critical
+            }
+        }
     }
 
     /**
@@ -104,7 +146,7 @@ class DashboardViewModel @Inject constructor(
     }
 
     /**
-     * Trigger a sync with Health Connect.
+     * Trigger a sync with Health Connect (workouts and sleep).
      */
     fun syncData() {
         viewModelScope.launch {
@@ -117,18 +159,24 @@ class DashboardViewModel @Inject constructor(
                 // Get the sync days preference
                 val syncDays = preferencesManager.syncDaysFlow.first()
                 
-                // Perform sync on IO thread
-                val result = withContext(Dispatchers.IO) {
+                // Perform sync on IO thread - workouts and sleep
+                val workoutResult = withContext(Dispatchers.IO) {
                     healthConnectManager.syncWorkouts(daysToLookBack = syncDays)
                 }
                 
-                if (result.isSuccess) {
+                // Also sync sleep data
+                withContext(Dispatchers.IO) {
+                    healthConnectManager.syncSleep(daysToLookBack = syncDays)
+                }
+                
+                if (workoutResult.isSuccess) {
                     _uiState.value = _uiState.value.copy(
                         syncStatus = SyncStatus.SUCCESS,
                         lastSyncTimestamp = System.currentTimeMillis()
                     )
-                    // Reload dashboard data to reflect new workouts
+                    // Reload dashboard data and performance metrics to reflect new workouts
                     loadDashboardData()
+                    loadPerformanceMetrics()
                     
                     // Reset success status after a delay
                     launch {
@@ -136,7 +184,7 @@ class DashboardViewModel @Inject constructor(
                         _uiState.value = _uiState.value.copy(syncStatus = SyncStatus.IDLE)
                     }
                 } else {
-                    val error = result.exceptionOrNull()
+                    val error = workoutResult.exceptionOrNull()
                     _uiState.value = _uiState.value.copy(
                         syncStatus = SyncStatus.ERROR,
                         syncError = error?.message ?: "Sync failed"

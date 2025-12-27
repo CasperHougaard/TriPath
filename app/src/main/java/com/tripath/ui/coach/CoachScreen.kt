@@ -8,22 +8,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Hotel
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Luggage
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,14 +42,18 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tripath.data.local.database.entities.SpecialPeriodType
+import com.tripath.data.model.TrainingBalance
+import com.tripath.data.model.WorkoutType
 import com.tripath.ui.coach.components.CoachAssessmentCard
 import com.tripath.ui.coach.components.PhaseTimeline
+import com.tripath.ui.coach.components.PlanSettingsCard
 import com.tripath.ui.coach.components.SpecialPeriodDialog
 import com.tripath.ui.coach.components.SpecialPeriodList
 import com.tripath.ui.components.SectionHeader
 import com.tripath.ui.components.charts.LineChart
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
+import java.time.DayOfWeek
 import java.time.LocalDate
 
 @Composable
@@ -55,6 +65,7 @@ fun CoachScreen(
     
     var showSpecialPeriodDialog by remember { mutableStateOf(false) }
     var initialDialogType by remember { mutableStateOf(SpecialPeriodType.INJURY) }
+    var clearExisting by remember { mutableStateOf(false) }
 
     Scaffold(modifier = modifier) { paddingValues ->
         if (uiState.isLoading) {
@@ -97,7 +108,55 @@ fun CoachScreen(
                         assessment = uiState.coachAssessment
                     )
 
-                    // 3. Performance Pulse (CTL/ATL/TSB)
+                    // 3. Plan Generation
+                    if (uiState.userProfile != null) {
+                        PlanSettingsCard(
+                            userProfile = uiState.userProfile!!,
+                            onUpdateSettings = { availability, longDay, strengthDays, balance ->
+                                viewModel.updateAvailability(availability, longDay, strengthDays, balance)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Checkbox(
+                                checked = clearExisting,
+                                onCheckedChange = { clearExisting = it }
+                            )
+                            Text(
+                                text = "Clear existing plans for this period",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+
+                        Button(
+                            onClick = { viewModel.generateTrainingBlock(clearExisting) },
+                            enabled = !uiState.isGenerating,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary
+                            )
+                        ) {
+                            if (uiState.isGenerating) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.padding(Spacing.sm))
+                                Text("Analyzing...")
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                                Spacer(modifier = Modifier.padding(Spacing.sm))
+                                Text("Generate Next Training Block")
+                            }
+                        }
+                    }
+
+                    // 4. Performance Pulse (CTL/ATL/TSB)
                     SectionHeader(
                         title = "Performance Pulse",
                         subtitle = "Fitness (CTL) vs Fatigue (ATL)"
@@ -108,7 +167,7 @@ fun CoachScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    // 4. Manual Intervention
+                    // 5. Manual Intervention
                     SectionHeader(
                         title = "Interventions",
                         subtitle = "Manage exceptions & breaks"
@@ -156,6 +215,28 @@ fun CoachScreen(
                 onConfirm = { type, start, end, notes ->
                     viewModel.addSpecialPeriod(type, start, end, notes)
                     showSpecialPeriodDialog = false
+                }
+            )
+        }
+
+        if (uiState.showPlanConfirmation) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissTrainingBlock() },
+                title = { Text("Training Plan Generated") },
+                text = { Text(uiState.generationSummary) },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.confirmTrainingBlock() }
+                    ) {
+                        Text("Save Plan")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { viewModel.dismissTrainingBlock() }
+                    ) {
+                        Text("Discard")
+                    }
                 }
             )
         }
@@ -207,4 +288,3 @@ fun InterventionButtons(
         }
     }
 }
-

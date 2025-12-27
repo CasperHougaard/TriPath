@@ -20,7 +20,7 @@ data class UserProfile(
     val defaultStrengthHeavyTSS: Int? = 60,
     
     /** Default TSS for light strength sessions per hour */
-    val defaultStrengthLightTSS: Int? = 40,
+    val defaultStrengthLightTSS: Int? = 30,
     
     /** Target Ironman race date (2027 goal) */
     val goalDate: LocalDate? = null,
@@ -32,6 +32,21 @@ data class UserProfile(
     val lthr: Int? = null,
     
     /** Critical Swim Speed in seconds per 100m */
-    val cssSecondsper100m: Int? = null
+    val cssSecondsper100m: Int? = null,
+
+    /** Threshold Run Pace in seconds per km */
+    val thresholdRunPace: Int? = null,
+
+    /** Map of DayOfWeek to allowed WorkoutTypes */
+    val weeklyAvailability: Map<java.time.DayOfWeek, List<WorkoutType>>? = null,
+
+    /** Preferred day for long sessions */
+    val longTrainingDay: java.time.DayOfWeek? = java.time.DayOfWeek.SUNDAY,
+
+    /** Number of strength sessions per week */
+    val strengthDays: Int? = 2,
+
+    /** Desired distribution of TSS across disciplines */
+    val trainingBalance: TrainingBalance? = TrainingBalance.IRONMAN_BASE
 )
 

@@ -2,6 +2,8 @@ package com.tripath.data.local.repository
 
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
+import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
@@ -69,6 +71,11 @@ interface TrainingRepository {
     suspend fun deleteAllTrainingPlans()
 
     /**
+     * Delete training plans within a date range.
+     */
+    suspend fun deleteTrainingPlansByDateRange(startDate: LocalDate, endDate: LocalDate)
+
+    /**
      * Copy all training plans from source week to target week.
      */
     suspend fun copyWeek(sourceStartDate: LocalDate, targetStartDate: LocalDate)
@@ -124,6 +131,45 @@ interface TrainingRepository {
      * Check if a workout log exists.
      */
     suspend fun workoutLogExists(connectId: String): Boolean
+
+    // ==================== Raw Workout Data Operations ====================
+
+    /**
+     * Get all raw workout data as a one-shot list.
+     */
+    suspend fun getAllRawWorkoutDataOnce(): List<RawWorkoutData>
+
+    /**
+     * Get raw workout data by its Health Connect ID.
+     */
+    suspend fun getRawWorkoutData(connectId: String): RawWorkoutData?
+
+    /**
+     * Insert multiple raw workout data records.
+     */
+    suspend fun insertRawWorkoutData(data: List<RawWorkoutData>)
+
+    // ==================== Sleep Log Operations ====================
+
+    /**
+     * Get all sleep logs as a reactive Flow.
+     */
+    fun getAllSleepLogs(): Flow<List<SleepLog>>
+
+    /**
+     * Get all sleep logs as a one-shot list (for backup).
+     */
+    suspend fun getAllSleepLogsOnce(): List<SleepLog>
+
+    /**
+     * Insert multiple sleep logs.
+     */
+    suspend fun insertSleepLogs(logs: List<SleepLog>)
+
+    /**
+     * Delete all sleep logs.
+     */
+    suspend fun deleteAllSleepLogs()
 
     // ==================== User Profile Operations ====================
 

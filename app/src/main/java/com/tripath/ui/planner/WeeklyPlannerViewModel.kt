@@ -1,5 +1,6 @@
 package com.tripath.ui.planner
 
+import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,11 +16,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.collectLatest
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
+import java.time.temporal.WeekFields
 import javax.inject.Inject
 import kotlin.math.ceil
 
@@ -31,17 +34,20 @@ data class WeeklyRowState(
     val totalDurationMinutes: Int,
     val tssCompletionProgress: Float,
     val hasTssJumpWarning: Boolean = false,
-    val monthLabel: String? = null // Label if month changes at this week
+    val monthLabel: String? = null, // Label if month changes at this week
+    val weekNumber: Int = 1 // Week number from start date
 )
 
 data class WeeklyPlannerUiState(
     val weeklyRows: List<WeeklyRowState> = emptyList(),
     val startDate: LocalDate = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
+    val currentMonth: LocalDate = LocalDate.now().with(TemporalAdjusters.firstDayOfMonth()),
     val disciplineDistribution: Map<WorkoutType, Float> = emptyMap(),
     val selectedDate: LocalDate? = null,
     val showBottomSheet: Boolean = false,
     val includeImportedActivities: Boolean = false,
-    val isMonthView: Boolean = false
+    val isMonthView: Boolean = false,
+    val userProfile: UserProfile? = null
 )
 
 @HiltViewModel
@@ -59,11 +65,20 @@ class WeeklyPlannerViewModel @Inject constructor(
     )
     private val _includeImportedActivities = MutableStateFlow(false)
 
-    private val dayNameFormatter = DateTimeFormatter.ofPattern("E") // Short day name for high density
-    private val monthFormatter = DateTimeFormatter.ofPattern("MMMM")
+    private val dayNameFormatter = DateTimeFormatter.ofPattern("E", java.util.Locale.ENGLISH)
+    private val monthFormatter = DateTimeFormatter.ofPattern("MMMM", java.util.Locale.ENGLISH)
 
     init {
         loadMatrixData()
+        observeUserProfile()
+    }
+
+    private fun observeUserProfile() {
+        viewModelScope.launch {
+            repository.getUserProfile().collect { profile ->
+                _uiState.value = _uiState.value.copy(userProfile = profile)
+            }
+        }
     }
 
     private fun getReferenceMonth(start: LocalDate, isMonthView: Boolean): LocalDate {
@@ -164,6 +179,9 @@ class WeeklyPlannerViewModel @Inject constructor(
                                 actualTSS.toFloat() / plannedTSS.toFloat()
                             } else if (actualTSS > 0) 1f else 0f
 
+                            // Calculate actual ISO week number
+                            val weekNumber = weekStart.get(WeekFields.ISO.weekOfWeekBasedYear())
+
                             WeeklyRowState(
                                 weekStart = weekStart,
                                 days = daysOfWeek,
@@ -171,7 +189,8 @@ class WeeklyPlannerViewModel @Inject constructor(
                                 actualTSS = actualTSS,
                                 totalDurationMinutes = totalDuration,
                                 tssCompletionProgress = progress.coerceIn(0f, 1f),
-                                monthLabel = monthLabel
+                                monthLabel = monthLabel,
+                                weekNumber = weekNumber
                             )
                         }
 
@@ -215,12 +234,16 @@ class WeeklyPlannerViewModel @Inject constructor(
                             }
                         } else emptyMap()
 
+                        val referenceMonth = getReferenceMonth(start, isMonthView)
+                        
                         WeeklyPlannerUiState(
                             weeklyRows = weeklyRows,
                             startDate = start,
+                            currentMonth = referenceMonth,
                             disciplineDistribution = distribution,
                             includeImportedActivities = includeImported,
-                            isMonthView = isMonthView
+                            isMonthView = isMonthView,
+                            userProfile = _uiState.value.userProfile
                         )
                     }
                 }.collect { newState ->

@@ -2,6 +2,8 @@ package com.tripath.ui.daydetail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tripath.data.model.UserProfile
+import com.tripath.data.model.WorkoutType
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.TrainingPlan
@@ -24,7 +26,8 @@ data class DayDetailUiState(
     val plannedActivities: List<TrainingPlan> = emptyList(),
     val completedWorkouts: List<WorkoutLog> = emptyList(),
     val dayNote: DayNote? = null,
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val userProfile: UserProfile? = null
 )
 
 @HiltViewModel
@@ -49,14 +52,16 @@ class DayDetailViewModel @Inject constructor(
             combine(
                 repository.getTrainingPlansByDateRange(date, date),
                 repository.getWorkoutLogsByDateRange(date, date),
-                repository.getDayNote(date)
-            ) { plans, logs, note ->
+                repository.getDayNote(date),
+                repository.getUserProfile()
+            ) { plans, logs, note, profile ->
                 DayDetailUiState(
                     date = date,
                     plannedActivities = plans,
                     completedWorkouts = logs,
                     dayNote = note,
-                    isLoading = false
+                    isLoading = false,
+                    userProfile = profile
                 )
             }.collect { newState ->
                 _uiState.value = newState

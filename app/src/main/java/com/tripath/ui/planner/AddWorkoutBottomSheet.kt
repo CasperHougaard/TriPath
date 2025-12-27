@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,7 +35,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
+import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.IntensityCalculator
+import com.tripath.ui.components.IntensityTag
+import com.tripath.ui.components.SmartAdviceCard
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import java.time.LocalDate
@@ -45,6 +51,7 @@ fun AddWorkoutBottomSheet(
     onDismiss: () -> Unit,
     onSave: (TrainingPlan) -> Unit,
     initialWorkout: TrainingPlan? = null,
+    userProfile: UserProfile? = null,
     modifier: Modifier = Modifier
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -56,12 +63,23 @@ fun AddWorkoutBottomSheet(
     var plannedTSS by remember { mutableIntStateOf(initialWorkout?.plannedTSS ?: 50) }
     var subType by remember { mutableStateOf(initialWorkout?.subType ?: "") }
 
+    // Dynamic Intensity Advice
+    val advice = selectedType?.let { type ->
+        IntensityCalculator.getAdvice(
+            workoutType = type,
+            tss = plannedTSS,
+            durationMinutes = duration,
+            userProfile = userProfile
+        )
+    }
+
     // Update TSS when intensity changes for STRENGTH
     if (selectedType == WorkoutType.STRENGTH && selectedIntensity != null) {
         plannedTSS = when (selectedIntensity) {
-            Intensity.LIGHT -> 30
-            Intensity.HEAVY -> 60
-            null -> 50
+            Intensity.LIGHT, Intensity.LOW -> 30
+            Intensity.HEAVY, Intensity.HIGH -> 60
+            Intensity.MODERATE -> 45
+            else -> plannedTSS
         }
     }
 
@@ -73,13 +91,29 @@ fun AddWorkoutBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(Spacing.lg),
+                .padding(Spacing.lg)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
-            Text(
-                text = if (initialWorkout != null) "Edit Workout" else "Add Workout",
-                style = MaterialTheme.typography.titleLarge
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (initialWorkout != null) "Edit Workout" else "Add Workout",
+                    style = MaterialTheme.typography.titleLarge
+                )
+                
+                advice?.let {
+                    IntensityTag(label = it.zoneLabel, colorType = it.tagColor)
+                }
+            }
+
+            // Coach Advice Section
+            advice?.let {
+                SmartAdviceCard(advice = it.advice, warning = it.warning)
+            }
 
             // Workout Type Selection
             Text(
@@ -127,6 +161,8 @@ fun AddWorkoutBottomSheet(
                                         StrengthFocus.FULL_BODY -> "Full"
                                         StrengthFocus.UPPER -> "Upper"
                                         StrengthFocus.LOWER -> "Lower"
+                                        StrengthFocus.HEAVY -> "Heavy"
+                                        StrengthFocus.STABILITY -> "Stability"
                                     }
                                 )
                             },
@@ -228,7 +264,8 @@ fun AddWorkoutBottomSheetPreview() {
         AddWorkoutBottomSheet(
             selectedDate = LocalDate.now(),
             onDismiss = {},
-            onSave = {}
+            onSave = {},
+            userProfile = null
         )
     }
 }

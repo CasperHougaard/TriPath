@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Alignment
@@ -109,6 +110,7 @@ fun MainScreen(
         NavigationItem(Icons.Default.CalendarMonth, "Planner", Screen.WeeklyPlanner.route),
         NavigationItem(Icons.Default.BarChart, "Stats", Screen.Stats.route),
         NavigationItem(Icons.Default.Person, "Coach", Screen.Coach.route),
+        NavigationItem(Icons.Default.Spa, "Recovery", Screen.Recovery.route),
         NavigationItem(Icons.Default.Settings, "Settings", Screen.Settings.route)
     )
 

@@ -9,8 +9,10 @@ import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
+import com.tripath.data.local.database.dao.WellnessDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
 import com.tripath.data.local.database.migrations.MIGRATION_1_2
+import com.tripath.data.local.database.migrations.MIGRATION_10_11
 import com.tripath.data.local.database.migrations.MIGRATION_2_3
 import com.tripath.data.local.database.migrations.MIGRATION_3_4
 import com.tripath.data.local.database.migrations.MIGRATION_4_5
@@ -55,8 +57,10 @@ object DatabaseModule {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
-                MIGRATION_9_10
+                MIGRATION_9_10,
+                MIGRATION_10_11
             )
+            .fallbackToDestructiveMigration() // Development fallback - allows DB to rebuild if migration fails
             .build()
     }
 
@@ -100,6 +104,12 @@ object DatabaseModule {
     @Singleton
     fun provideSleepLogDao(database: AppDatabase): SleepLogDao {
         return database.sleepLogDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideWellnessDao(database: AppDatabase): WellnessDao {
+        return database.wellnessDao()
     }
 }
 

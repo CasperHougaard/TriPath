@@ -1,5 +1,7 @@
 package com.tripath.di
 
+import com.tripath.data.local.repository.RecoveryRepository
+import com.tripath.data.local.repository.RecoveryRepositoryImpl
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.local.repository.TrainingRepositoryImpl
 import dagger.Binds
@@ -21,5 +23,11 @@ abstract class RepositoryModule {
     abstract fun bindTrainingRepository(
         trainingRepositoryImpl: TrainingRepositoryImpl
     ): TrainingRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindRecoveryRepository(
+        recoveryRepositoryImpl: RecoveryRepositoryImpl
+    ): RecoveryRepository
 }
 

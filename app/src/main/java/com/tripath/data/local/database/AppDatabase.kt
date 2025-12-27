@@ -12,13 +12,16 @@ import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
+import com.tripath.data.local.database.dao.WellnessDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
+import com.tripath.data.local.database.entities.DailyWellnessLog
 import com.tripath.data.local.database.entities.RawWorkoutData
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
+import com.tripath.data.local.database.entities.WellnessTaskDefinition
 import com.tripath.data.local.database.entities.WorkoutLog
 
 /**
@@ -36,9 +39,11 @@ import com.tripath.data.local.database.entities.WorkoutLog
         DayNote::class,
         DayTemplate::class,
         RawWorkoutData::class,
-        SleepLog::class
+        SleepLog::class,
+        DailyWellnessLog::class,
+        WellnessTaskDefinition::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -51,6 +56,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dayTemplateDao(): DayTemplateDao
     abstract fun rawWorkoutDataDao(): RawWorkoutDataDao
     abstract fun sleepLogDao(): SleepLogDao
+    abstract fun wellnessDao(): WellnessDao
 
     companion object {
         const val DATABASE_NAME = "tripath_database"

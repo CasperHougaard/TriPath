@@ -1,8 +1,10 @@
 package com.tripath.data.local.database.converters
 
 import androidx.room.TypeConverter
+import com.tripath.data.model.AllergySeverity
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
+import com.tripath.data.model.TaskTriggerType
 import com.tripath.data.model.WorkoutType
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -66,6 +68,44 @@ class Converters {
     @TypeConverter
     fun toIntensity(name: String?): Intensity? {
         return name?.let { Intensity.valueOf(it) }
+    }
+
+    // AllergySeverity converters
+    @TypeConverter
+    fun fromAllergySeverity(severity: AllergySeverity?): String? {
+        return severity?.name
+    }
+
+    @TypeConverter
+    fun toAllergySeverity(name: String?): AllergySeverity? {
+        return name?.let { AllergySeverity.valueOf(it) }
+    }
+
+    // TaskTriggerType converters
+    @TypeConverter
+    fun fromTaskTriggerType(type: TaskTriggerType?): String? {
+        return type?.name
+    }
+
+    @TypeConverter
+    fun toTaskTriggerType(name: String?): TaskTriggerType? {
+        return name?.let { TaskTriggerType.valueOf(it) }
+    }
+
+    // List<Long> converters for completedTaskIds
+    @TypeConverter
+    fun fromLongList(list: List<Long>?): String? {
+        return if (list.isNullOrEmpty()) null else Json.encodeToString(list)
+    }
+
+    @TypeConverter
+    fun toLongList(json: String?): List<Long>? {
+        if (json.isNullOrBlank()) return null
+        return try {
+            Json.decodeFromString<List<Long>>(json)
+        } catch (e: Exception) {
+            null
+        }
     }
 }
 

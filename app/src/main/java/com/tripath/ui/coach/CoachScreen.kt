@@ -72,9 +72,6 @@ fun CoachScreen(
     val readinessState by viewModel.readinessState.collectAsStateWithLifecycle()
     val alertsState by viewModel.alertsState.collectAsStateWithLifecycle()
     val isSmartPlanningEnabled by viewModel.isSmartPlanningEnabled.collectAsStateWithLifecycle()
-    val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
-    val generationError by viewModel.generationError.collectAsStateWithLifecycle()
-    val generationSuccess by viewModel.generationSuccess.collectAsStateWithLifecycle()
     
     var showSpecialPeriodDialog by remember { mutableStateOf(false) }
     var initialDialogType by remember { mutableStateOf(SpecialPeriodType.INJURY) }
@@ -222,22 +219,6 @@ fun CoachScreen(
                         )
                     }
                     
-                    // Auto-Pilot Generation
-                    SectionHeader(
-                        title = "Auto-Pilot Generation",
-                        subtitle = "Generate training plan using Iron Brain"
-                    )
-                    
-                    AutoPilotGenerationCard(
-                        isGenerating = isGenerating,
-                        generationError = generationError,
-                        generationSuccess = generationSuccess,
-                        onGenerate = { viewModel.generateSeasonPlan(months = 3) },
-                        onDismissError = { viewModel.clearGenerationError() },
-                        onDismissSuccess = { viewModel.clearGenerationSuccess() },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    
                     Spacer(modifier = Modifier.height(Spacing.xl))
                 }
             }
@@ -260,111 +241,6 @@ fun CoachScreen(
                 readinessStatus = currentReadinessState,
                 onDismiss = { showReadinessBreakdown = false }
             )
-        }
-    }
-}
-
-@Composable
-fun AutoPilotGenerationCard(
-    isGenerating: Boolean,
-    generationError: String?,
-    generationSuccess: Int?,
-    onGenerate: () -> Unit,
-    onDismissError: () -> Unit,
-    onDismissSuccess: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(Spacing.lg),
-            verticalArrangement = Arrangement.spacedBy(Spacing.md)
-        ) {
-            Text(
-                text = "Generate 3-Month Training Plan",
-                style = MaterialTheme.typography.titleMedium
-            )
-            
-            Text(
-                text = "Automatically generate a training plan based on your profile, current fitness, and Iron Brain rules.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-            )
-            
-            Button(
-                onClick = onGenerate,
-                enabled = !isGenerating,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (isGenerating) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(modifier = Modifier.padding(Spacing.sm))
-                    Text("Generating...")
-                } else {
-                    Text("Generate Plan")
-                }
-            }
-            
-            // Show error if any
-            generationError?.let { error ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(Spacing.md),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = error,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = onDismissError) {
-                            Text("Dismiss")
-                        }
-                    }
-                }
-            }
-            
-            // Show success if any
-            generationSuccess?.let { count ->
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(Spacing.md),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Successfully generated $count training plans!",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = onDismissSuccess) {
-                            Text("Dismiss")
-                        }
-                    }
-                }
-            }
         }
     }
 }

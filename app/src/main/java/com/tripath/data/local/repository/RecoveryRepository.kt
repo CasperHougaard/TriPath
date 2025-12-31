@@ -100,6 +100,16 @@ interface RecoveryRepository {
      */
     suspend fun deleteTaskById(id: Long)
 
+    /**
+     * Delete all wellness logs.
+     */
+    suspend fun deleteAllLogs()
+
+    /**
+     * Delete all wellness task definitions.
+     */
+    suspend fun deleteAllTasks()
+
     // ==================== Initialization ====================
 
     /**

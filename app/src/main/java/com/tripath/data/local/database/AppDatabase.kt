@@ -43,7 +43,7 @@ import com.tripath.data.local.database.entities.WorkoutLog
         DailyWellnessLog::class,
         WellnessTaskDefinition::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = true
 )
 @TypeConverters(Converters::class)

@@ -147,6 +147,12 @@ fun SettingsScreen(
                         if (it.specialPeriodsImported > 0) {
                             append(", ${it.specialPeriodsImported} special periods")
                         }
+                        if (it.wellnessLogsImported > 0) {
+                            append(", ${it.wellnessLogsImported} wellness logs")
+                        }
+                        if (it.wellnessTasksImported > 0) {
+                            append(", ${it.wellnessTasksImported} wellness tasks")
+                        }
                         if (it.profileImported) {
                             append(", and profile")
                         }

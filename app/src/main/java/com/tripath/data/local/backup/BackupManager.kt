@@ -2,13 +2,16 @@ package com.tripath.data.local.backup
 
 import com.tripath.data.local.database.AppDatabase
 import com.tripath.data.local.database.entities.DayTemplate
+import com.tripath.data.local.database.entities.DailyWellnessLog
 import com.tripath.data.local.database.entities.RawWorkoutData
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.local.database.entities.TrainingPlan
+import com.tripath.data.local.database.entities.WellnessTaskDefinition
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.model.UserProfile
+import com.tripath.data.local.repository.RecoveryRepository
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
@@ -30,6 +33,7 @@ import javax.inject.Singleton
 @Singleton
 class BackupManager @Inject constructor(
     private val repository: TrainingRepository,
+    private val recoveryRepository: RecoveryRepository,
     private val database: AppDatabase
 ) {
     private val json = Json {
@@ -40,7 +44,7 @@ class BackupManager @Inject constructor(
 
     /**
      * Export all data to a JSON string.
-     * Includes training plans, workout logs, special periods, sleep logs, and user profile.
+     * Includes training plans, workout logs, special periods, sleep logs, recovery data, and user profile.
      */
     suspend fun exportToJson(): String {
         return withContext(Dispatchers.IO) {
@@ -49,6 +53,8 @@ class BackupManager @Inject constructor(
             val rawWorkoutData = repository.getAllRawWorkoutDataOnce()
             val sleepLogs = repository.getAllSleepLogsOnce()
             val specialPeriods = repository.getAllSpecialPeriodsOnce()
+            val wellnessLogs = recoveryRepository.getAllWellnessLogsOnce()
+            val wellnessTasks = recoveryRepository.getAllTasksOnce()
             val userProfile = repository.getUserProfileOnce()
 
             val backupData = AppBackupData(
@@ -59,6 +65,8 @@ class BackupManager @Inject constructor(
                 rawWorkoutData = rawWorkoutData.map { it.toDto() },
                 sleepLogs = sleepLogs.map { it.toDto() },
                 specialPeriods = specialPeriods.map { it.toDto() },
+                wellnessLogs = wellnessLogs.map { it.toDto() },
+                wellnessTasks = wellnessTasks.map { it.toDto() },
                 userProfile = userProfile?.toDto()
             )
 
@@ -89,6 +97,8 @@ class BackupManager @Inject constructor(
                 val summary = database.withTransaction {
                     // Clear all existing data
                     repository.clearAllData()
+                    recoveryRepository.deleteAllLogs()
+                    recoveryRepository.deleteAllTasks()
 
                     // Import training plans
                     val trainingPlans = backupData.trainingPlans.map { it.toEntity() }
@@ -110,6 +120,14 @@ class BackupManager @Inject constructor(
                     val specialPeriods = backupData.specialPeriods.map { it.toEntity() }
                     repository.insertSpecialPeriods(specialPeriods)
 
+                    // Import wellness logs
+                    val wellnessLogs = backupData.wellnessLogs.map { it.toEntity() }
+                    wellnessLogs.forEach { recoveryRepository.insertWellnessLog(it) }
+
+                    // Import wellness tasks
+                    val wellnessTasks = backupData.wellnessTasks.map { it.toEntity() }
+                    recoveryRepository.insertTasks(wellnessTasks)
+
                     // Import user profile
                     backupData.userProfile?.let { profileDto ->
                         repository.upsertUserProfile(profileDto.toEntity())
@@ -121,6 +139,8 @@ class BackupManager @Inject constructor(
                         rawWorkoutDataImported = rawWorkoutData.size,
                         sleepLogsImported = sleepLogs.size,
                         specialPeriodsImported = specialPeriods.size,
+                        wellnessLogsImported = wellnessLogs.size,
+                        wellnessTasksImported = wellnessTasks.size,
                         profileImported = backupData.userProfile != null
                     )
                 }
@@ -145,7 +165,7 @@ class BackupManager @Inject constructor(
     }
 
     companion object {
-        const val BACKUP_VERSION = 3
+        const val BACKUP_VERSION = 4
     }
 }
 
@@ -158,6 +178,8 @@ data class ImportSummary(
     val rawWorkoutDataImported: Int,
     val sleepLogsImported: Int,
     val specialPeriodsImported: Int,
+    val wellnessLogsImported: Int,
+    val wellnessTasksImported: Int,
     val profileImported: Boolean
 )
 
@@ -168,13 +190,15 @@ data class ImportSummary(
  */
 @Serializable
 data class AppBackupData(
-    val version: Int = 3,
+    val version: Int = 4,
     val timestamp: Long,
     val trainingPlans: List<TrainingPlanDto>,
     val workoutLogs: List<WorkoutLogDto>,
     val rawWorkoutData: List<RawWorkoutDataDto> = emptyList(),
     val sleepLogs: List<SleepLogDto> = emptyList(),
     val specialPeriods: List<SpecialPeriodDto> = emptyList(),
+    val wellnessLogs: List<DailyWellnessLogDto> = emptyList(),
+    val wellnessTasks: List<WellnessTaskDefinitionDto> = emptyList(),
     val userProfile: UserProfileDto?
 )
 
@@ -265,6 +289,34 @@ data class SpecialPeriodDto(
     @Serializable(with = LocalDateSerializer::class)
     val endDate: LocalDate,
     val notes: String?
+)
+
+/**
+ * DTO for DailyWellnessLog serialization.
+ */
+@Serializable
+data class DailyWellnessLogDto(
+    @Serializable(with = LocalDateSerializer::class)
+    val date: LocalDate,
+    val sleepMinutes: Int? = null,
+    val hrvRmssd: Double? = null,
+    val morningWeight: Double? = null,
+    val sorenessIndex: Int? = null,
+    val moodIndex: Int? = null,
+    val allergySeverity: String? = null,
+    val completedTaskIds: List<Long>? = null
+)
+
+/**
+ * DTO for WellnessTaskDefinition serialization.
+ */
+@Serializable
+data class WellnessTaskDefinitionDto(
+    val id: Long = 0,
+    val title: String,
+    val description: String? = null,
+    val type: String,
+    val triggerThreshold: Int? = null
 )
 
 /**
@@ -441,5 +493,43 @@ private fun UserProfileDto.toEntity() = UserProfile(
     lthr = lthr,
     cssSecondsper100m = cssSecondsper100m,
     thresholdRunPace = thresholdRunPace
+)
+
+private fun DailyWellnessLog.toDto() = DailyWellnessLogDto(
+    date = date,
+    sleepMinutes = sleepMinutes,
+    hrvRmssd = hrvRmssd,
+    morningWeight = morningWeight,
+    sorenessIndex = sorenessIndex,
+    moodIndex = moodIndex,
+    allergySeverity = allergySeverity?.name,
+    completedTaskIds = completedTaskIds
+)
+
+private fun DailyWellnessLogDto.toEntity() = DailyWellnessLog(
+    date = date,
+    sleepMinutes = sleepMinutes,
+    hrvRmssd = hrvRmssd,
+    morningWeight = morningWeight,
+    sorenessIndex = sorenessIndex,
+    moodIndex = moodIndex,
+    allergySeverity = allergySeverity?.let { com.tripath.data.model.AllergySeverity.valueOf(it) },
+    completedTaskIds = completedTaskIds
+)
+
+private fun WellnessTaskDefinition.toDto() = WellnessTaskDefinitionDto(
+    id = id,
+    title = title,
+    description = description,
+    type = type.name,
+    triggerThreshold = triggerThreshold
+)
+
+private fun WellnessTaskDefinitionDto.toEntity() = WellnessTaskDefinition(
+    id = id,
+    title = title,
+    description = description,
+    type = com.tripath.data.model.TaskTriggerType.valueOf(type),
+    triggerThreshold = triggerThreshold
 )
 

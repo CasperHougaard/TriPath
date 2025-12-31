@@ -3,6 +3,7 @@ package com.tripath.ui.recovery
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.DailyWellnessLog
+import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.WellnessTaskDefinition
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.repository.RecoveryRepository
@@ -55,7 +56,8 @@ data class RecoveryUiState(
 data class RecoveryHistoryDay(
     val date: LocalDate,
     val wellnessLog: DailyWellnessLog?,
-    val dailyTss: Int
+    val dailyTss: Int,
+    val sleepLog: SleepLog? = null
 )
 
 /**
@@ -141,7 +143,9 @@ class RecoveryViewModel @Inject constructor(
     )
 
     init {
-        initializeDefaults()
+        viewModelScope.launch {
+            recoveryRepository.initializeDefaults()
+        }
         loadSuggestedWeight()
     }
 
@@ -197,13 +201,17 @@ class RecoveryViewModel @Inject constructor(
             
             combine(
                 recoveryRepository.getWellnessLogsByDateRange(startDate, endDate),
-                trainingRepository.getWorkoutLogsByDateRange(startDate, endDate)
-            ) { logs, workouts ->
+                trainingRepository.getWorkoutLogsByDateRange(startDate, endDate),
+                trainingRepository.getSleepLogsByDateRange(startDate, endDate)
+            ) { logs, workouts, sleepLogs ->
                 // Create a map of date to daily TSS
                 val tssByDate = workouts.groupBy { it.date }
                     .mapValues { (_, dayWorkouts) ->
                         dayWorkouts.sumOf { it.computedTSS ?: 0 }
                     }
+                
+                // Create a map of date to sleep log
+                val sleepLogByDate = sleepLogs.associateBy { it.date }
                 
                 // Create list of all days in range
                 val daysInRange = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate).toInt()
@@ -211,11 +219,13 @@ class RecoveryViewModel @Inject constructor(
                     val date = startDate.plusDays(daysOffset.toLong())
                     val log = logs.find { it.date == date }
                     val dailyTss = tssByDate[date] ?: 0
+                    val sleepLog = sleepLogByDate[date]
                     
                     RecoveryHistoryDay(
                         date = date,
                         wellnessLog = log,
-                        dailyTss = dailyTss
+                        dailyTss = dailyTss,
+                        sleepLog = sleepLog
                     )
                 }
             }
@@ -225,19 +235,6 @@ class RecoveryViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
         )
-
-    init {
-        initializeDefaults()
-    }
-
-    /**
-     * Initialize default tasks if the database is empty
-     */
-    private fun initializeDefaults() {
-        viewModelScope.launch {
-            recoveryRepository.initializeDefaults()
-        }
-    }
 
     /**
      * Change the selected date

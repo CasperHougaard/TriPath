@@ -110,6 +110,16 @@ class TrainingRepositoryImpl @Inject constructor(
     override fun getWorkoutLogsByType(type: WorkoutType): Flow<List<WorkoutLog>> =
         workoutLogDao.getByType(type)
 
+    override suspend fun getRecentDisciplineLoads(): Map<WorkoutType, Int> {
+        val endDate = LocalDate.now()
+        val startDate = endDate.minusDays(28)
+        val results = workoutLogDao.getAverageWeeklyTssPerType(
+            startDate.toEpochDay(),
+            endDate.toEpochDay()
+        )
+        return results.associate { it.type to it.averageWeeklyTss }
+    }
+
     override suspend fun insertWorkoutLog(log: WorkoutLog) =
         workoutLogDao.insert(log)
 
@@ -146,6 +156,12 @@ class TrainingRepositoryImpl @Inject constructor(
 
     override suspend fun getAllSleepLogsOnce(): List<SleepLog> =
         sleepLogDao.getAllOnce()
+
+    override fun getSleepLogsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<SleepLog>> =
+        sleepLogDao.getByDateRange(startDate.toEpochDay(), endDate.toEpochDay())
+
+    override suspend fun getSleepLogByDate(date: LocalDate): SleepLog? =
+        sleepLogDao.getByDate(date.toEpochDay())
 
     override suspend fun insertSleepLogs(logs: List<SleepLog>) =
         sleepLogDao.insertAll(logs)

@@ -28,7 +28,7 @@ class TrainingRulesEngine @Inject constructor(
      * Calculate readiness status from multiple recovery metrics.
      * 
      * @param tsb Training Stress Balance (CTL - ATL)
-     * @param sleepHours Sleep duration in hours
+     * @param sleepScore Sleep score (1-100) from Recovery Trends
      * @param soreness Subjective soreness (1-10 scale)
      * @param mood Subjective mood (1-10 scale)
      * @param allergy Allergy severity level
@@ -36,7 +36,7 @@ class TrainingRulesEngine @Inject constructor(
      */
     suspend fun calculateReadiness(
         tsb: Int,
-        sleepHours: Double?,
+        sleepScore: Int?,
         soreness: Int?,
         mood: Int?,
         allergy: AllergySeverity
@@ -54,36 +54,25 @@ class TrainingRulesEngine @Inject constructor(
         }
 
         // Subjective Component (30%) - Average of soreness and mood
-        val subjectiveScore = if (soreness != null && mood != null) {
+        val (subjectiveScore, subjectiveRawValue) = if (soreness != null && mood != null) {
             val avg = (soreness + mood) / 2.0
-            // Scale 1-10 to 0-100: (avg - 1) / 9 * 100
-            ((avg - 1) / 9.0 * 100).toInt().coerceIn(0, 100)
+            val score = ((avg - 1) / 9.0 * 100).toInt().coerceIn(0, 100)
+            Pair(score, avg)
         } else if (soreness != null) {
-            ((soreness - 1) / 9.0 * 100).toInt().coerceIn(0, 100)
+            val score = ((soreness - 1) / 9.0 * 100).toInt().coerceIn(0, 100)
+            Pair(score, soreness.toDouble())
         } else if (mood != null) {
-            ((mood - 1) / 9.0 * 100).toInt().coerceIn(0, 100)
+            val score = ((mood - 1) / 9.0 * 100).toInt().coerceIn(0, 100)
+            Pair(score, mood.toDouble())
         } else {
-            50 // Default middle score if neither available
+            Pair(50, null) // Default middle score if neither available
         }
 
-        // Sleep Component (20%)
-        val sleepScore = if (sleepHours != null) {
-            when {
-                sleepHours >= 8.0 -> 100
-                sleepHours <= 5.0 -> 0
-                else -> {
-                    // Linear interpolation: 5h -> 0, 8h -> 100
-                    val range = 8.0 - 5.0 // 3
-                    val position = sleepHours - 5.0
-                    ((position / range) * 100).toInt().coerceIn(0, 100)
-                }
-            }
-        } else {
-            50 // Default middle score if not available
-        }
+        // Sleep Component (20%) - Use sleep score directly (already 0-100 scale)
+        val sleepScoreComponent = sleepScore ?: 50 // Default middle score if not available
 
         // Calculate weighted score
-        val weightedScore = (tsbScore * 0.5 + subjectiveScore * 0.3 + sleepScore * 0.2).roundToInt()
+        val weightedScore = (tsbScore * 0.5 + subjectiveScore * 0.3 + sleepScoreComponent * 0.2).roundToInt()
 
         // Apply allergy penalty
         val allergyPenalty = when (allergy) {
@@ -101,14 +90,15 @@ class TrainingRulesEngine @Inject constructor(
             else -> ReadinessColor.RED
         }
 
-        // Build breakdown string
+        // Build breakdown string with raw values → scores
         val breakdown = buildString {
-            append("TSB: $tsbScore")
-            if (sleepHours != null) {
+            append("TSB: $tsb → $tsbScore")
+            if (sleepScore != null) {
                 append(", Sleep: $sleepScore")
             }
-            if (soreness != null || mood != null) {
-                append(", Subjective: $subjectiveScore")
+            if (subjectiveRawValue != null) {
+                val subjectiveFormatted = String.format("%.1f", subjectiveRawValue)
+                append(", Subjective: ${subjectiveFormatted}/10 → $subjectiveScore")
             }
         }
 

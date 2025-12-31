@@ -39,9 +39,9 @@ class PlanningSettingsViewModel @Inject constructor(
         preferencesManager.strengthSpacingHoursFlow,
         preferencesManager.rampRateLimitFlow,
         preferencesManager.mechanicalLoadMonitoringFlow
-    ) { smartPlanning, consecutive, spacing, rampRate, monitoring ->
+    ) { smartPlanning: Boolean, consecutive: Boolean, spacing: Int, rampRate: Float, monitoring: Boolean ->
         FirstFiveSettings(smartPlanning, consecutive, spacing, rampRate, monitoring)
-    }.combine(preferencesManager.allowCommuteExemptionFlow) { first5, commute ->
+    }.combine(preferencesManager.allowCommuteExemptionFlow) { first5: FirstFiveSettings, commute: Boolean ->
         PlanningSettingsState(
             isSmartPlanningEnabled = first5.smartPlanning,
             runConsecutiveAllowed = first5.consecutive,

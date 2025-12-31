@@ -141,8 +141,9 @@ class WeeklyPlannerViewModel @Inject constructor(
                     combine(
                         repository.getTrainingPlansByDateRange(start, end),
                         repository.getWorkoutLogsByDateRange(start, end),
-                        repository.getSpecialPeriodsByDateRange(start, end)
-                    ) { plans, logs, specialPeriods ->
+                        repository.getSpecialPeriodsByDateRange(start, end),
+                        preferencesManager.smartPlanningEnabledFlow
+                    ) { plans, logs, specialPeriods, smartPlanningEnabled ->
                         // Filter out training plans if Smart Planning is disabled
                         val filteredPlans = if (smartPlanningEnabled) {
                             plans

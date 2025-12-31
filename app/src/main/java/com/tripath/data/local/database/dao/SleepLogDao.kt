@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.tripath.data.local.database.entities.SleepLog
 import kotlinx.coroutines.flow.Flow
+import java.time.LocalDate
 
 /**
  * Data Access Object for SleepLog entity.
@@ -38,11 +39,24 @@ interface SleepLogDao {
     @Query("SELECT * FROM sleep_logs WHERE date >= :startDate AND date <= :endDate ORDER BY date DESC")
     fun getByDateRange(startDate: Long, endDate: Long): Flow<List<SleepLog>>
 
+
     /**
      * Get sleep log for a specific date.
      */
     @Query("SELECT * FROM sleep_logs WHERE date = :date")
     suspend fun getByDate(date: Long): SleepLog?
+
+    /**
+     * Get all sleep logs with null sleepScore for backfill processing.
+     */
+    @Query("SELECT * FROM sleep_logs WHERE sleepScore IS NULL")
+    suspend fun getLogsWithoutScore(): List<SleepLog>
+
+    /**
+     * Update sleep score for a specific sleep log.
+     */
+    @Query("UPDATE sleep_logs SET sleepScore = :score WHERE connectId = :connectId")
+    suspend fun updateSleepScore(connectId: String, score: Int)
 
     /**
      * Check if a sleep log exists for the given Health Connect ID.

@@ -14,31 +14,59 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.ui.theme.TriPathTheme
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Activity that displays the privacy policy for Health Connect integration.
  * This is required by Health Connect to explain how health data is used.
  */
+@AndroidEntryPoint
 class HealthConnectPrivacyPolicyActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var preferencesManager: PreferencesManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Set navigation bar to white for visibility in dark theme
-        // Note: navigationBarColor is deprecated in Android 15, but there's no direct replacement
-        // without moving to full edge-to-edge implementation
-        @Suppress("DEPRECATION")
-        window.navigationBarColor = android.graphics.Color.WHITE
-        val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
-        windowInsetsController.isAppearanceLightNavigationBars = true
-        
         setContent {
-            TriPathTheme {
+            // Observe dark theme preference
+            val isDarkTheme by preferencesManager.darkThemeFlow.collectAsState(initial = true)
+            val view = LocalView.current
+            
+            // Configure Android system status bar and navigation bar icons based on theme
+            DisposableEffect(isDarkTheme) {
+                val windowInsetsController = WindowCompat.getInsetsController(window, view)
+                
+                if (isDarkTheme) {
+                    // Dark theme: dark bars with bright icons
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                    windowInsetsController.isAppearanceLightNavigationBars = false
+                    windowInsetsController.isAppearanceLightStatusBars = false
+                } else {
+                    // Light theme: light bars with dark icons
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = android.graphics.Color.WHITE
+                    windowInsetsController.isAppearanceLightNavigationBars = true
+                    windowInsetsController.isAppearanceLightStatusBars = true
+                }
+                
+                onDispose { }
+            }
+            
+            TriPathTheme(darkTheme = isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

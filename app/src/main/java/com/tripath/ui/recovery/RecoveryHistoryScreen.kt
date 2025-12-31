@@ -76,6 +76,7 @@ fun RecoveryHistoryScreen(
     
     var showReadinessInfo by remember { mutableStateOf(false) }
     var showBiologicalCostInfo by remember { mutableStateOf(false) }
+    var showSleepScoreInfo by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -244,6 +245,50 @@ fun RecoveryHistoryScreen(
             }
         }
 
+        // Chart 4: Sleep Score Trend
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(Spacing.lg),
+                verticalArrangement = Arrangement.spacedBy(Spacing.md)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Sleep Score Trend",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(
+                        onClick = { showSleepScoreInfo = true },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = "Info",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+                SleepScoreChart(
+                    historyData = historyState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                )
+            }
+        }
+
         // Habit Consistency Grid
         HabitConsistencyCard(
             historyState = historyState,
@@ -279,6 +324,25 @@ fun RecoveryHistoryScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showBiologicalCostInfo = false }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
+
+    if (showSleepScoreInfo) {
+        AlertDialog(
+            onDismissRequest = { showSleepScoreInfo = false },
+            title = { Text("Sleep Score") },
+            text = {
+                Text(
+                    "Sleep Score (1-100) based on duration, stage quality, efficiency, and awakenings. " +
+                    "For strength training, deep sleep is weighted higher for muscle recovery. " +
+                    "Scores are extracted from Garmin when available, or calculated from sleep data."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showSleepScoreInfo = false }) {
                     Text("OK")
                 }
             }
@@ -833,6 +897,130 @@ private fun WeightTrendChart(
                     color = weightColor,
                     style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
                 )
+            }
+
+            // Draw X-axis labels
+            val xAxisTextStyle = TextStyle(color = textColor, fontSize = 9.sp)
+            val labelInterval = when {
+                historyData.size <= 7 -> 1
+                historyData.size <= 31 -> 5
+                else -> maxOf(1, historyData.size / 12)
+            }
+            historyData.forEachIndexed { index, day ->
+                if (index % labelInterval == 0 || index == historyData.size - 1) {
+                    val x = chartLeft + (chartWidth / (historyData.size - 1).coerceAtLeast(1)) * index
+                    val formatter = when {
+                        historyData.size <= 7 -> DateTimeFormatter.ofPattern("EEE")
+                        historyData.size <= 31 -> DateTimeFormatter.ofPattern("MMM d")
+                        else -> DateTimeFormatter.ofPattern("MMM")
+                    }
+                    val text = day.date.format(formatter)
+                    val textLayoutResult = textMeasurer.measure(text, xAxisTextStyle)
+                    drawText(
+                        textLayoutResult = textLayoutResult,
+                        topLeft = Offset(
+                            x - textLayoutResult.size.width / 2,
+                            chartBottom + 8.dp.toPx()
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SleepScoreChart(
+    historyData: List<RecoveryHistoryDay>,
+    modifier: Modifier = Modifier
+) {
+    val sleepScores = historyData.mapNotNull { it.sleepLog?.sleepScore?.toFloat() }
+
+    if (sleepScores.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "No sleep data available",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        return
+    }
+
+    val textMeasurer = rememberTextMeasurer()
+    val gridLineColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+    val textColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+    val sleepScoreColor = Color(0xFF6B9BD2) // Soft blue
+
+    Box(modifier = modifier) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val padding = 50.dp.toPx()
+            val chartWidth = size.width - padding * 2
+            val chartHeight = size.height - padding * 2
+            val chartLeft = padding
+            val chartTop = padding
+            val chartBottom = chartTop + chartHeight
+
+            // Draw grid lines
+            for (i in 0..4) {
+                val y = chartTop + (chartHeight / 4) * i
+                drawLine(
+                    color = gridLineColor,
+                    start = Offset(chartLeft, y),
+                    end = Offset(chartLeft + chartWidth, y),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+
+            // Draw Y-axis labels (0-100 scale)
+            val yAxisTextStyle = TextStyle(color = textColor, fontSize = 10.sp)
+            for (i in 0..4) {
+                val value = 100 - (100 / 4) * i
+                val y = chartTop + (chartHeight / 4) * i
+                val text = value.toString()
+                val textLayoutResult = textMeasurer.measure(text, yAxisTextStyle)
+                drawText(
+                    textLayoutResult = textLayoutResult,
+                    topLeft = Offset(
+                        chartLeft - textLayoutResult.size.width - 8.dp.toPx(),
+                        y - textLayoutResult.size.height / 2
+                    )
+                )
+            }
+
+            // Draw sleep score line
+            val sleepPoints = mutableListOf<Offset>()
+            historyData.forEachIndexed { index, day ->
+                day.sleepLog?.sleepScore?.let { score ->
+                    val x = chartLeft + (chartWidth / (historyData.size - 1).coerceAtLeast(1)) * index
+                    val normalizedScore = (score / 100f).coerceIn(0f, 1f)
+                    val y = chartBottom - (chartHeight * normalizedScore)
+                    sleepPoints.add(Offset(x, y))
+                }
+            }
+            
+            if (sleepPoints.isNotEmpty()) {
+                val sleepPath = Path()
+                sleepPath.moveTo(sleepPoints[0].x, sleepPoints[0].y)
+                sleepPoints.drop(1).forEach { point ->
+                    sleepPath.lineTo(point.x, point.y)
+                }
+                drawPath(
+                    path = sleepPath,
+                    color = sleepScoreColor,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+                
+                // Draw data points (small circles)
+                sleepPoints.forEach { point ->
+                    drawCircle(
+                        color = sleepScoreColor,
+                        radius = 4.dp.toPx(),
+                        center = point
+                    )
+                }
             }
 
             // Draw X-axis labels

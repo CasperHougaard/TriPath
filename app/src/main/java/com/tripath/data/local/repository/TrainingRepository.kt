@@ -108,6 +108,14 @@ interface TrainingRepository {
     fun getWorkoutLogsByType(type: WorkoutType): Flow<List<WorkoutLog>>
 
     /**
+     * Get average weekly TSS per workout type over the last 4 weeks (28 days).
+     * Used for discipline-specific planning logic to prevent injury.
+     * 
+     * @return Map of WorkoutType to average weekly TSS (Int)
+     */
+    suspend fun getRecentDisciplineLoads(): Map<WorkoutType, Int>
+
+    /**
      * Insert a workout log (from Health Connect sync).
      */
     suspend fun insertWorkoutLog(log: WorkoutLog)
@@ -160,6 +168,16 @@ interface TrainingRepository {
      * Get all sleep logs as a one-shot list (for backup).
      */
     suspend fun getAllSleepLogsOnce(): List<SleepLog>
+
+    /**
+     * Get sleep logs within a date range.
+     */
+    fun getSleepLogsByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<SleepLog>>
+
+    /**
+     * Get sleep log for a specific date (one-shot).
+     */
+    suspend fun getSleepLogByDate(date: LocalDate): SleepLog?
 
     /**
      * Insert multiple sleep logs.

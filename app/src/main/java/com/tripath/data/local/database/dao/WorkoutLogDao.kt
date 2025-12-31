@@ -10,6 +10,14 @@ import com.tripath.data.model.WorkoutType
 import kotlinx.coroutines.flow.Flow
 
 /**
+ * Data class to hold the result of average weekly TSS per workout type query.
+ */
+data class WorkoutTypeTssAverage(
+    val type: WorkoutType,
+    val averageWeeklyTss: Int
+)
+
+/**
  * Data Access Object for WorkoutLog entity.
  * Provides all database operations for completed workouts synced from Health Connect.
  */
@@ -93,5 +101,22 @@ interface WorkoutLogDao {
      */
     @Query("SELECT EXISTS(SELECT 1 FROM workout_logs WHERE connectId = :connectId)")
     suspend fun exists(connectId: String): Boolean
+
+    /**
+     * Get average weekly TSS per workout type over a date range.
+     * Calculates the sum of TSS for each workout type and divides by 4 to get weekly average.
+     * 
+     * @param startDate Start date (epoch days)
+     * @param endDate End date (epoch days)
+     * @return List of WorkoutTypeTssAverage containing type and average weekly TSS
+     */
+    @Query("""
+        SELECT type, (SUM(computedTSS) / 4) as averageWeeklyTss
+        FROM workout_logs
+        WHERE date >= :startDate AND date <= :endDate 
+          AND computedTSS IS NOT NULL
+        GROUP BY type
+    """)
+    suspend fun getAverageWeeklyTssPerType(startDate: Long, endDate: Long): List<WorkoutTypeTssAverage>
 }
 

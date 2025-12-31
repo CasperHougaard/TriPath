@@ -48,6 +48,9 @@ data class SleepLog(
     /** Time spent awake during the sleep session in minutes */
     val awakeMinutes: Int? = null,
     
+    /** Sleep score (1-100) extracted from Garmin or calculated from sleep data */
+    val sleepScore: Int? = null,
+    
     /** Timestamp when this record was imported into TriPath database */
     val importedAt: Long = System.currentTimeMillis()
 )

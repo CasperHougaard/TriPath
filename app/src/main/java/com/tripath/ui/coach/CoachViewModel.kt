@@ -10,6 +10,7 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.RecoveryRepository
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.data.model.AnchorType
 import com.tripath.data.model.AllergySeverity
 import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.UserProfile
@@ -43,6 +44,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
 
 private data class Data(
@@ -197,7 +199,7 @@ class CoachViewModel @Inject constructor(
                 preferencesManager.smartPlanningEnabledFlow,
                 repository.getTrainingPlansByDateRange(today, today),
                 repository.getUserProfile()
-            ) { workoutLogs, wellnessLog, smartEnabled, todayPlans, profile ->
+            ) { workoutLogs: List<WorkoutLog>, wellnessLog: DailyWellnessLog?, smartEnabled: Boolean, todayPlans: List<TrainingPlan>, profile: UserProfile? ->
                 ReadinessData(
                     workoutLogs = workoutLogs,
                     wellnessLog = wellnessLog,
@@ -205,7 +207,7 @@ class CoachViewModel @Inject constructor(
                     todayPlans = todayPlans,
                     profile = profile
                 )
-            }.collect { data ->
+            }.collect { data: ReadinessData ->
                 val today = LocalDate.now()
                 val workoutLogs = data.workoutLogs
                 
@@ -224,13 +226,17 @@ class CoachViewModel @Inject constructor(
                         allergySeverity = AllergySeverity.NONE
                     )
                     
-                    val sleepHours = wellness.sleepMinutes?.div(60.0)
+                    // Get sleep score from last night's sleep (yesterday's date, since sleep is dated by start time)
+                    // For example: if today is Tuesday, we want Monday night's sleep (dated Monday)
+                    val lastNightDate = today.minusDays(1)
+                    val sleepLog = repository.getSleepLogByDate(lastNightDate)
+                    val sleepScore = sleepLog?.sleepScore
                     val tsbInt = currentMetrics.tsb.roundToInt()
                     
                     // Calculate readiness
                     val readiness = trainingRulesEngine.calculateReadiness(
                         tsb = tsbInt,
-                        sleepHours = sleepHours,
+                        sleepScore = sleepScore,
                         soreness = wellness.sorenessIndex,
                         mood = wellness.moodIndex,
                         allergy = wellness.allergySeverity ?: AllergySeverity.NONE
@@ -426,6 +432,22 @@ class CoachViewModel @Inject constructor(
         }
     }
 
+    fun updateDayAnchor(day: DayOfWeek, type: AnchorType) {
+        viewModelScope.launch {
+            val currentProfile = _uiState.value.userProfile
+            val currentSchedule = currentProfile?.weeklySchedule?.toMutableMap() 
+                ?: UserProfile.DEFAULT_WEEKLY_SCHEDULE.toMutableMap()
+            currentSchedule[day] = type
+            
+            val updatedProfile = currentProfile?.copy(weeklySchedule = currentSchedule)
+                ?: UserProfile(weeklySchedule = currentSchedule)
+            
+            withContext(Dispatchers.IO) {
+                repository.upsertUserProfile(updatedProfile)
+            }
+        }
+    }
+
     fun generateSeasonPlan(months: Int = 3) {
         viewModelScope.launch {
             _isGenerating.value = true
@@ -450,27 +472,48 @@ class CoachViewModel @Inject constructor(
                     )
                     val currentCtl = currentMetrics.ctl
                     
+                    // Calculate the next Monday (or current Monday if today is Monday)
+                    // This ensures plans always start at the beginning of a week
+                    val planStartDate = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
+                    
                     // Get recent logs for cold-start validation (last 14 days)
                     val recentLogs = allLogs.filter { 
                         !it.date.isBefore(today.minusDays(14)) && 
                         !it.date.isAfter(today.minusDays(1))
                     }
                     
-                    // Generate the plan
-                    val generatedPlans = coachPlanGenerator.generateSeason(
-                        startDate = today,
+                    // Delete existing plans for the generation period to avoid over-population
+                    // Start deletion from the plan start date (next Monday)
+                    val endDate = planStartDate.plusMonths(months.toLong())
+                    repository.deleteTrainingPlansByDateRange(planStartDate, endDate)
+                    
+                    // Generate the plan starting from next Monday
+                    val generationResult = coachPlanGenerator.generateSeason(
+                        startDate = planStartDate,
                         currentCtl = currentCtl,
                         months = months,
                         recentRealLogs = recentLogs
                     )
                     
-                    // Save to database
-                    if (generatedPlans.isNotEmpty()) {
-                        repository.insertTrainingPlans(generatedPlans)
-                        _generationSuccess.value = generatedPlans.size
-                    } else {
-                        // Empty list could mean validation failed
-                        _generationError.value = "Generation produced no plans. Please check your profile settings and goal date."
+                    // Handle result
+                    when (generationResult) {
+                        is CoachPlanGenerator.GenerationResult.Success -> {
+                            val generatedPlans = generationResult.plans
+                            if (generatedPlans.isNotEmpty()) {
+                                repository.insertTrainingPlans(generatedPlans)
+                                _generationSuccess.value = generatedPlans.size
+                            } else {
+                                _generationError.value = "Generation completed but produced no plans. Please check your weekly availability and training constraints."
+                            }
+                        }
+                        is CoachPlanGenerator.GenerationResult.Failure -> {
+                            val errorMessage = if (generationResult.details != null) {
+                                "${generationResult.reason}\n\n${generationResult.details}"
+                            } else {
+                                generationResult.reason
+                            }
+                            _generationError.value = errorMessage
+                        }
                     }
                 }
             } catch (e: Exception) {

@@ -5,6 +5,7 @@ import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.data.model.AnchorType
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.TrainingBalance
@@ -41,6 +42,25 @@ class CoachPlanGenerator @Inject constructor(
         object Success : ValidationResult()
         data class Failure(val reason: String) : ValidationResult()
     }
+
+    /**
+     * Result of plan generation operation.
+     */
+    sealed class GenerationResult {
+        data class Success(val plans: List<TrainingPlan>) : GenerationResult()
+        data class Failure(val reason: String, val details: String? = null) : GenerationResult()
+    }
+
+    /**
+     * Represents discipline-specific TSS budgets for a training period.
+     */
+    data class DisciplineBudget(
+        val swimTss: Int,
+        val bikeTss: Int,
+        val runTss: Int,
+        val strengthTss: Int,
+        val totalTss: Int
+    )
 
     /**
      * Validate profile and generation parameters before generating a season.
@@ -114,7 +134,7 @@ class CoachPlanGenerator @Inject constructor(
             // Note: We'll cap this in calculatePrescriptiveTSS, but log warning here
         }
 
-        // Goal Date Range Check: Must be at least 2 weeks away, not more than 1 year
+        // Goal Date Range Check: Must be at least 2 weeks away, not more than 2 years
         val daysUntilGoal = java.time.temporal.ChronoUnit.DAYS.between(startDate, goalDate)
         val weeksUntilGoal = daysUntilGoal / 7.0
         
@@ -123,9 +143,9 @@ class CoachPlanGenerator @Inject constructor(
             return ValidationResult.Failure("Goal date is too close (${weeksUntilGoal.toInt()} weeks). Minimum 2 weeks required.")
         }
         
-        if (daysUntilGoal > 365) {
-            Log.e(TAG, "❌ VALIDATION FAILED: Goal date ($goalDate) is too far (${daysUntilGoal} days / ${weeksUntilGoal} weeks). Maximum 1 year for accurate projection.")
-            return ValidationResult.Failure("Goal date is too far (${daysUntilGoal} days). Maximum 1 year for accurate projection.")
+        if (daysUntilGoal > 730) {
+            Log.e(TAG, "❌ VALIDATION FAILED: Goal date ($goalDate) is too far (${daysUntilGoal} days / ${weeksUntilGoal} weeks). Maximum 2 years for accurate projection.")
+            return ValidationResult.Failure("Goal date is too far (${daysUntilGoal} days). Maximum 2 years for accurate projection.")
         }
 
         // Generation duration check: Ensure we're not generating beyond goal date
@@ -145,18 +165,21 @@ class CoachPlanGenerator @Inject constructor(
      * @param currentCtl Current Chronic Training Load
      * @param months Number of months to generate (default 3)
      * @param recentRealLogs Recent real workout logs for cold-start validation (if empty, will fetch from repository)
-     * @return List of generated TrainingPlan objects
+     * @return GenerationResult containing either the generated plans or a failure reason
      */
     suspend fun generateSeason(
         startDate: LocalDate,
         currentCtl: Double,
         months: Int = 3,
         recentRealLogs: List<WorkoutLog> = emptyList()
-    ): List<TrainingPlan> {
+    ): GenerationResult {
         val smartEnabled = preferencesManager.smartPlanningEnabledFlow.first()
         if (!smartEnabled) {
             Log.e(TAG, "Smart Planning is DISABLED in settings. Aborting.")
-            return emptyList()
+            return GenerationResult.Failure(
+                reason = "Smart Planning is disabled",
+                details = "Please enable Smart Planning in Coach Settings to generate training plans."
+            )
         }
 
         val userProfile = repository.getUserProfileOnce()
@@ -173,7 +196,10 @@ class CoachPlanGenerator @Inject constructor(
         
         if (validation is ValidationResult.Failure) {
             Log.e(TAG, "Generation aborted: ${validation.reason}")
-            return emptyList()
+            return GenerationResult.Failure(
+                reason = validation.reason,
+                details = getValidationFailureDetails(validation.reason, userProfile, startDate)
+            )
         }
 
         // Validation passed, continue with generation
@@ -188,6 +214,9 @@ class CoachPlanGenerator @Inject constructor(
         } else {
             recentRealLogs
         }
+
+        // Fetch recent discipline loads for budget calculation
+        val recentLoads = repository.getRecentDisciplineLoads()
 
         val generatedPlan = mutableListOf<TrainingPlan>()
         var currentSimulatedCtl = currentCtl
@@ -213,7 +242,8 @@ class CoachPlanGenerator @Inject constructor(
                 profile = userProfile,
                 existingHistory = generatedPlan,
                 recentRealLogs = realLogs,
-                phase = phase
+                phase = phase,
+                recentLoads = recentLoads
             )
             generatedPlan.addAll(weekPlan)
 
@@ -224,7 +254,54 @@ class CoachPlanGenerator @Inject constructor(
         }
 
         Log.i(TAG, "✅ GENERATION COMPLETE. Created ${generatedPlan.size} workouts.")
-        return generatedPlan
+        
+        if (generatedPlan.isEmpty()) {
+            return GenerationResult.Failure(
+                reason = "No training plans were generated",
+                details = "The generation process completed but produced no plans. This may occur if Iron Brain rules blocked all workout placements. Check your weekly availability and training constraints."
+            )
+        }
+        
+        return GenerationResult.Success(generatedPlan)
+    }
+
+    /**
+     * Get helpful details for validation failures to guide the user.
+     */
+    private fun getValidationFailureDetails(
+        reason: String,
+        profile: UserProfile?,
+        startDate: LocalDate
+    ): String {
+        return when {
+            reason.contains("Goal date", ignoreCase = true) -> {
+                val goalDate = profile?.goalDate
+                if (goalDate == null) {
+                    "Go to Profile Settings and set your primary race date (goal date)."
+                } else if (!goalDate.isAfter(LocalDate.now())) {
+                    "Your goal date ($goalDate) is in the past. Please update it to a future date in Profile Settings."
+                } else {
+                    val daysUntil = java.time.temporal.ChronoUnit.DAYS.between(startDate, goalDate)
+                    when {
+                        daysUntil < 14 -> "Your goal date is only ${daysUntil} days away. Minimum 2 weeks required for meaningful plan generation."
+                        daysUntil > 730 -> "Your goal date is ${daysUntil} days away (over 2 years). Please set a goal date within the next 2 years."
+                        else -> "Please check your goal date settings in Profile Settings."
+                    }
+                }
+            }
+            reason.contains("CTL", ignoreCase = true) -> {
+                "Your current fitness level (CTL) is outside valid range. This usually means you need more training history. Try logging some workouts first."
+            }
+            reason.contains("profile", ignoreCase = true) -> {
+                "Please complete your user profile in Profile Settings. Required: goal date, training balance, and weekly availability."
+            }
+            reason.contains("availability", ignoreCase = true) -> {
+                "No training days are available. Please set your weekly availability in Profile Settings."
+            }
+            else -> {
+                "Please review your profile settings and ensure all required information is complete."
+            }
+        }
     }
 
     /**
@@ -288,79 +365,77 @@ class CoachPlanGenerator @Inject constructor(
         profile: UserProfile,
         existingHistory: List<TrainingPlan>,
         recentRealLogs: List<WorkoutLog>,
-        phase: TrainingPhase
+        phase: TrainingPhase,
+        recentLoads: Map<WorkoutType, Int>
     ): List<TrainingPlan> {
         val weekPlan = mutableListOf<TrainingPlan>()
         var usedTSS = 0
 
-        // Get preferences
-        val strengthSpacingHours = preferencesManager.strengthSpacingHoursFlow.first()
-
-        // 1. PLACE ANCHORS (Priority: Strength & Long Run)
+        // Get user-defined weekly schedule (or use default)
+        val schedule = profile.weeklySchedule ?: UserProfile.DEFAULT_WEEKLY_SCHEDULE
         
-        // A. Strength sessions
-        val strengthDays = getStrengthDaysForWeek(
+        // Calculate discipline-specific budget
+        // Count strength sessions from schedule instead of hardcoded logic
+        val strengthSessions = schedule.values.count { it == AnchorType.STRENGTH }
+        val balance = profile.trainingBalance ?: TrainingBalance.IRONMAN_BASE
+        val budget = calculateDisciplineBudget(
+            totalTargetTSS = targetTSS,
+            balance = balance,
+            strengthSessions = strengthSessions,
+            recentLoads = recentLoads
+        )
+        Log.d(TAG, "  📊 Planned Budget: Run=${budget.runTss}, Bike=${budget.bikeTss}, Swim=${budget.swimTss}, Strength=${budget.strengthTss}, Total=${budget.totalTss}")
+
+        // 1. PLACE USER-DEFINED ANCHORS
+        val anchorsUsedTSS = placeUserAnchors(
             weekStart = weekStart,
+            schedule = schedule,
+            budget = budget,
             profile = profile,
+            weekPlan = weekPlan,
+            existingHistory = existingHistory,
+            recentRealLogs = recentRealLogs,
             phase = phase,
-            strengthSpacingHours = strengthSpacingHours,
-            existingPlans = weekPlan
+            targetTSS = targetTSS
         )
         
-        strengthDays.forEach { (dayOfWeek, date) ->
-            if (validatePlacement(date, WorkoutType.STRENGTH, existingHistory, recentRealLogs)) {
-                val strengthSession = createGhostPlan(
-                    date = date,
-                    type = WorkoutType.STRENGTH,
-                    duration = 60,
-                    tss = profile.defaultStrengthHeavyTSS ?: 60,
-                    strengthFocus = StrengthFocus.FULL_BODY, // TODO: Rotate based on week
-                    intensity = Intensity.HEAVY
-                )
-                weekPlan.add(strengthSession)
-                usedTSS += strengthSession.plannedTSS
-                Log.d(TAG, "  + Strength scheduled on $dayOfWeek ($date)")
-            } else {
-                Log.w(TAG, "  x Strength BLOCKED on $dayOfWeek ($date) by Iron Brain rules.")
-            }
-        }
+        // Calculate actual TSS used by anchors per discipline
+        val anchorRunTSS = weekPlan.filter { it.type == WorkoutType.RUN }.sumOf { it.plannedTSS }
+        val anchorBikeTSS = weekPlan.filter { it.type == WorkoutType.BIKE }.sumOf { it.plannedTSS }
+        val anchorSwimTSS = weekPlan.filter { it.type == WorkoutType.SWIM }.sumOf { it.plannedTSS }
+        val anchorStrengthTSS = weekPlan.filter { it.type == WorkoutType.STRENGTH }.sumOf { it.plannedTSS }
+        
+        // Adjust budget for remaining TSS after anchors
+        val adjustedBudget = DisciplineBudget(
+            swimTss = budget.swimTss - anchorSwimTSS,
+            bikeTss = budget.bikeTss - anchorBikeTSS,
+            runTss = budget.runTss - anchorRunTSS,
+            strengthTss = budget.strengthTss - anchorStrengthTSS,
+            totalTss = budget.totalTss - anchorsUsedTSS
+        )
+        Log.d(TAG, "  📉 Adjusted Budget after anchors: Run=${adjustedBudget.runTss}, Bike=${adjustedBudget.bikeTss}, Swim=${adjustedBudget.swimTss}, Strength=${adjustedBudget.strengthTss}")
 
-        // B. Long Run
-        val longRunDate = getDateForDay(weekStart, profile.longTrainingDay ?: DayOfWeek.SUNDAY)
-        if (validatePlacement(longRunDate, WorkoutType.RUN, existingHistory + weekPlan, recentRealLogs)) {
-            val longRunDuration = calculateLongRunDuration(profile, phase, targetTSS)
-            val longRunTSS = (longRunDuration * 1.2).roundToInt() // Rough TSS estimate
-            val longRun = createGhostPlan(
-                date = longRunDate,
-                type = WorkoutType.RUN,
-                duration = longRunDuration,
-                tss = longRunTSS,
-                subType = "Long Run"
-            )
-            weekPlan.add(longRun)
-            usedTSS += longRunTSS
-            Log.d(TAG, "  + Long Run scheduled on ${profile.longTrainingDay} (${longRunDuration}min)")
-        }
-
-        // 2. FILL THE GAPS (Balance)
-        val remainingTSS = targetTSS - usedTSS
-        if (remainingTSS > 0) {
-            val (updatedPlan, remainingBudget) = fillGaps(
-                weekStart = weekStart,
-                budget = remainingTSS,
-                profile = profile,
-                currentWeekPlan = weekPlan,
-                history = existingHistory,
-                recentRealLogs = recentRealLogs,
-                phase = phase
-            )
-            weekPlan.clear()
-            weekPlan.addAll(updatedPlan)
-            
-            if (remainingBudget > targetTSS * 0.2) {
-                Log.w(TAG, "  ⚠️ Under-volume warning: Target $targetTSS TSS, achieved ${targetTSS - remainingBudget} TSS, remaining $remainingBudget TSS")
-            }
-        }
+        // 2. FILL THE GAPS (Balance) - Use adjusted discipline-specific budget
+        val updatedPlan = fillGaps(
+            weekStart = weekStart,
+            budget = adjustedBudget,
+            profile = profile,
+            currentWeekPlan = weekPlan,
+            history = existingHistory,
+            recentRealLogs = recentRealLogs,
+            phase = phase
+        )
+        weekPlan.clear()
+        weekPlan.addAll(updatedPlan)
+        
+        // Log final week summary
+        val finalRunTSS = weekPlan.filter { it.type == WorkoutType.RUN }.sumOf { it.plannedTSS }
+        val finalBikeTSS = weekPlan.filter { it.type == WorkoutType.BIKE }.sumOf { it.plannedTSS }
+        val finalSwimTSS = weekPlan.filter { it.type == WorkoutType.SWIM }.sumOf { it.plannedTSS }
+        val finalStrengthTSS = weekPlan.filter { it.type == WorkoutType.STRENGTH }.sumOf { it.plannedTSS }
+        val finalTotalTSS = weekPlan.sumOf { it.plannedTSS }
+        
+        Log.d(TAG, "  📈 Week Summary: Run=$finalRunTSS/${budget.runTss}, Bike=$finalBikeTSS/${budget.bikeTss}, Swim=$finalSwimTSS/${budget.swimTss}, Strength=$finalStrengthTSS/${budget.strengthTss}, Total=$finalTotalTSS/${budget.totalTss}")
 
         return weekPlan
     }
@@ -398,6 +473,253 @@ class CoachPlanGenerator @Inject constructor(
         }
         
         return duration.coerceIn(30, 240) // Cap between 30 min and 4 hours
+    }
+
+    /**
+     * Calculate long bike duration based on training balance and phase.
+     */
+    private fun calculateLongBikeDuration(
+        profile: UserProfile,
+        phase: TrainingPhase,
+        targetTSS: Int
+    ): Int {
+        // Base duration from training balance
+        val baseDuration = when (profile.trainingBalance) {
+            TrainingBalance.IRONMAN_BASE -> 180
+            TrainingBalance.BALANCED -> 120
+            TrainingBalance.BIKE_FOCUS -> 240
+            else -> 150 // Default
+        }
+        
+        // Phase adjustments
+        val phaseMultiplier = when (phase) {
+            TrainingPhase.Taper -> 0.6
+            TrainingPhase.Transition -> 0.4
+            else -> 1.0
+        }
+        
+        var duration = (baseDuration * phaseMultiplier).roundToInt()
+        
+        // Scale with target TSS
+        if (targetTSS > 400) {
+            duration = (duration * 1.2).roundToInt()
+        } else if (targetTSS < 200) {
+            duration = (duration * 0.8).roundToInt()
+        }
+        
+        return duration.coerceIn(30, 360) // Cap between 30 min and 6 hours
+    }
+
+    /**
+     * Place user-defined anchor workouts based on weekly schedule.
+     * Returns the total TSS used by anchors.
+     */
+    private suspend fun placeUserAnchors(
+        weekStart: LocalDate,
+        schedule: Map<DayOfWeek, AnchorType>,
+        budget: DisciplineBudget,
+        profile: UserProfile,
+        weekPlan: MutableList<TrainingPlan>,
+        existingHistory: List<TrainingPlan>,
+        recentRealLogs: List<WorkoutLog>,
+        phase: TrainingPhase,
+        targetTSS: Int
+    ): Int {
+        var totalUsedTSS = 0
+        
+        // Track current TSS per discipline from anchors
+        var usedRunTSS = 0
+        var usedBikeTSS = 0
+        var usedSwimTSS = 0
+        var usedStrengthTSS = 0
+        
+        // Iterate through all days of the week
+        DayOfWeek.values().forEach { day ->
+            val anchorType = schedule[day] ?: AnchorType.NONE
+            if (anchorType == AnchorType.NONE) return@forEach
+            
+            val date = getDateForDay(weekStart, day)
+            
+            // Skip if day already has a workout (shouldn't happen, but safety check)
+            if (weekPlan.any { it.date == date }) {
+                Log.w(TAG, "  ⚠️ Day $day already has a workout, skipping anchor")
+                return@forEach
+            }
+            
+            when (anchorType) {
+                AnchorType.STRENGTH -> {
+                    // Check if we have strength budget remaining
+                    if (usedStrengthTSS >= budget.strengthTss) {
+                        Log.w(TAG, "  ⚠️ Strength budget exhausted, skipping anchor on $day")
+                        return@forEach
+                    }
+                    
+                    if (validatePlacement(date, WorkoutType.STRENGTH, existingHistory, recentRealLogs)) {
+                        val strengthTSS = profile.defaultStrengthHeavyTSS ?: 60
+                        val workout = createGhostPlan(
+                            date = date,
+                            type = WorkoutType.STRENGTH,
+                            duration = 60,
+                            tss = strengthTSS,
+                            strengthFocus = StrengthFocus.FULL_BODY,
+                            intensity = Intensity.HEAVY
+                        )
+                        weekPlan.add(workout)
+                        usedStrengthTSS += strengthTSS
+                        totalUsedTSS += strengthTSS
+                        Log.d(TAG, "  + Strength anchor scheduled on $day ($date)")
+                    } else {
+                        Log.w(TAG, "  x Strength anchor BLOCKED on $day ($date) by Iron Brain rules")
+                    }
+                }
+                
+                AnchorType.LONG_RUN -> {
+                    // Check if we have run budget remaining
+                    if (usedRunTSS >= budget.runTss) {
+                        Log.w(TAG, "  ⚠️ Run budget exhausted, skipping long run anchor on $day")
+                        return@forEach
+                    }
+                    
+                    if (validatePlacement(date, WorkoutType.RUN, existingHistory + weekPlan, recentRealLogs)) {
+                        val longRunDuration = calculateLongRunDuration(profile, phase, targetTSS)
+                        val longRunTSS = (longRunDuration * 1.2).roundToInt()
+                        
+                        // Check if this fits in budget
+                        if (usedRunTSS + longRunTSS <= budget.runTss) {
+                            val workout = createGhostPlan(
+                                date = date,
+                                type = WorkoutType.RUN,
+                                duration = longRunDuration,
+                                tss = longRunTSS,
+                                subType = "Long Run"
+                            )
+                            weekPlan.add(workout)
+                            usedRunTSS += longRunTSS
+                            totalUsedTSS += longRunTSS
+                            Log.d(TAG, "  + Long Run anchor scheduled on $day ($date, ${longRunDuration}min)")
+                        } else {
+                            Log.w(TAG, "  ⚠️ Long Run would exceed budget, skipping anchor on $day")
+                        }
+                    } else {
+                        Log.w(TAG, "  x Long Run anchor BLOCKED on $day ($date) by Iron Brain rules")
+                    }
+                }
+                
+                AnchorType.LONG_BIKE -> {
+                    // Check if we have bike budget remaining
+                    if (usedBikeTSS >= budget.bikeTss) {
+                        Log.w(TAG, "  ⚠️ Bike budget exhausted, skipping long bike anchor on $day")
+                        return@forEach
+                    }
+                    
+                    if (validatePlacement(date, WorkoutType.BIKE, existingHistory + weekPlan, recentRealLogs)) {
+                        val longBikeDuration = calculateLongBikeDuration(profile, phase, targetTSS)
+                        val longBikeTSS = (longBikeDuration * 0.8).roundToInt() // Lower TSS per hour for bike
+                        
+                        // Check if this fits in budget
+                        if (usedBikeTSS + longBikeTSS <= budget.bikeTss) {
+                            val workout = createGhostPlan(
+                                date = date,
+                                type = WorkoutType.BIKE,
+                                duration = longBikeDuration,
+                                tss = longBikeTSS,
+                                subType = "Long Bike"
+                            )
+                            weekPlan.add(workout)
+                            usedBikeTSS += longBikeTSS
+                            totalUsedTSS += longBikeTSS
+                            Log.d(TAG, "  + Long Bike anchor scheduled on $day ($date, ${longBikeDuration}min)")
+                        } else {
+                            Log.w(TAG, "  ⚠️ Long Bike would exceed budget, skipping anchor on $day")
+                        }
+                    } else {
+                        Log.w(TAG, "  x Long Bike anchor BLOCKED on $day ($date) by Iron Brain rules")
+                    }
+                }
+                
+                AnchorType.RUN -> {
+                    if (usedRunTSS >= budget.runTss) {
+                        Log.w(TAG, "  ⚠️ Run budget exhausted, skipping run anchor on $day")
+                        return@forEach
+                    }
+                    
+                    if (validatePlacement(date, WorkoutType.RUN, existingHistory + weekPlan, recentRealLogs)) {
+                        val runTSS = 45 // Standard run
+                        if (usedRunTSS + runTSS <= budget.runTss) {
+                            val workout = createGhostPlan(
+                                date = date,
+                                type = WorkoutType.RUN,
+                                duration = 45,
+                                tss = runTSS
+                            )
+                            weekPlan.add(workout)
+                            usedRunTSS += runTSS
+                            totalUsedTSS += runTSS
+                            Log.d(TAG, "  + Run anchor scheduled on $day ($date)")
+                        }
+                    } else {
+                        Log.w(TAG, "  x Run anchor BLOCKED on $day ($date) by Iron Brain rules")
+                    }
+                }
+                
+                AnchorType.BIKE -> {
+                    if (usedBikeTSS >= budget.bikeTss) {
+                        Log.w(TAG, "  ⚠️ Bike budget exhausted, skipping bike anchor on $day")
+                        return@forEach
+                    }
+                    
+                    if (validatePlacement(date, WorkoutType.BIKE, existingHistory + weekPlan, recentRealLogs)) {
+                        val bikeTSS = 40 // Standard bike
+                        if (usedBikeTSS + bikeTSS <= budget.bikeTss) {
+                            val workout = createGhostPlan(
+                                date = date,
+                                type = WorkoutType.BIKE,
+                                duration = 45,
+                                tss = bikeTSS
+                            )
+                            weekPlan.add(workout)
+                            usedBikeTSS += bikeTSS
+                            totalUsedTSS += bikeTSS
+                            Log.d(TAG, "  + Bike anchor scheduled on $day ($date)")
+                        }
+                    } else {
+                        Log.w(TAG, "  x Bike anchor BLOCKED on $day ($date) by Iron Brain rules")
+                    }
+                }
+                
+                AnchorType.SWIM -> {
+                    if (usedSwimTSS >= budget.swimTss) {
+                        Log.w(TAG, "  ⚠️ Swim budget exhausted, skipping swim anchor on $day")
+                        return@forEach
+                    }
+                    
+                    if (validatePlacement(date, WorkoutType.SWIM, existingHistory + weekPlan, recentRealLogs)) {
+                        val swimTSS = profile.defaultSwimTSS ?: 60
+                        if (usedSwimTSS + swimTSS <= budget.swimTss) {
+                            val workout = createGhostPlan(
+                                date = date,
+                                type = WorkoutType.SWIM,
+                                duration = 60,
+                                tss = swimTSS
+                            )
+                            weekPlan.add(workout)
+                            usedSwimTSS += swimTSS
+                            totalUsedTSS += swimTSS
+                            Log.d(TAG, "  + Swim anchor scheduled on $day ($date)")
+                        }
+                    } else {
+                        Log.w(TAG, "  x Swim anchor BLOCKED on $day ($date) by Iron Brain rules")
+                    }
+                }
+                
+                AnchorType.NONE -> {
+                    // Do nothing, leave for fillGaps
+                }
+            }
+        }
+        
+        Log.d(TAG, "  📌 Anchors placed: Run=$usedRunTSS, Bike=$usedBikeTSS, Swim=$usedSwimTSS, Strength=$usedStrengthTSS, Total=$totalUsedTSS")
+        return totalUsedTSS
     }
 
     /**
@@ -542,82 +864,143 @@ class CoachPlanGenerator @Inject constructor(
     }
 
     /**
-     * Fill gaps in the week with remaining TSS budget.
+     * Fill gaps in the week with discipline-specific TSS budgets.
+     * Fills Run, Bike, and Swim sequentially while preserving anchor workouts.
      */
     private suspend fun fillGaps(
         weekStart: LocalDate,
-        budget: Int,
+        budget: DisciplineBudget,
         profile: UserProfile,
         currentWeekPlan: MutableList<TrainingPlan>,
         history: List<TrainingPlan>,
         recentRealLogs: List<WorkoutLog>,
         phase: TrainingPhase
-    ): Pair<List<TrainingPlan>, Int> {
-        var budgetLeft = budget
+    ): List<TrainingPlan> {
         val updatedPlan = currentWeekPlan.toMutableList()
         
-        // Determine phase-appropriate workout types
-        val preferredTypes = when (phase) {
-            TrainingPhase.OffSeason -> listOf(WorkoutType.BIKE, WorkoutType.SWIM, WorkoutType.RUN)
-            TrainingPhase.Taper, TrainingPhase.Transition -> listOf(WorkoutType.SWIM, WorkoutType.BIKE) // Less impact
-            else -> listOf(WorkoutType.BIKE, WorkoutType.RUN, WorkoutType.SWIM)
+        // Calculate current TSS per discipline from existing plans
+        val currentRunTSS = updatedPlan.filter { it.type == WorkoutType.RUN }.sumOf { it.plannedTSS }
+        val currentBikeTSS = updatedPlan.filter { it.type == WorkoutType.BIKE }.sumOf { it.plannedTSS }
+        val currentSwimTSS = updatedPlan.filter { it.type == WorkoutType.SWIM }.sumOf { it.plannedTSS }
+        val currentStrengthTSS = updatedPlan.filter { it.type == WorkoutType.STRENGTH }.sumOf { it.plannedTSS }
+        
+        // Phase A: Strength Verification (already placed as anchors)
+        if (currentStrengthTSS > budget.strengthTss) {
+            Log.w(TAG, "  ⚠️ Strength TSS ($currentStrengthTSS) exceeds budget (${budget.strengthTss})")
         }
         
-        // Iterate through days of week
-        for (i in 0..6) {
-            if (budgetLeft <= 0) break
+        // Phase B: Run Filling (High Priority)
+        var neededRun = budget.runTss - currentRunTSS
+        if (neededRun > 0) {
+            Log.d(TAG, "  🏃 Filling Run: needed=$neededRun TSS")
+            var runTSSAdded = 0
             
-            val date = weekStart.plusDays(i.toLong())
-            
-            // Skip if day already has a workout
-            if (updatedPlan.any { it.date == date }) continue
-            
-            // Check availability
-            val dayOfWeek = date.dayOfWeek
-            val availableTypes = profile.weeklyAvailability?.get(dayOfWeek) ?: listOf(WorkoutType.RUN, WorkoutType.BIKE, WorkoutType.SWIM)
-            
-            // Try to add workout from preferred types
-            for (type in preferredTypes) {
-                if (type !in availableTypes) continue
-                if (budgetLeft <= 0) break
+            for (i in 0..6) {
+                if (neededRun <= 0) break
                 
-                if (validatePlacement(date, type, history + updatedPlan, recentRealLogs)) {
-                    val duration = 45
-                    val tss = when (type) {
-                        WorkoutType.SWIM -> profile.defaultSwimTSS ?: 60
-                        else -> 40 // Default for bike/run filler
-                    }
-                    val workout = createGhostPlan(date, type, duration, tss)
-                    updatedPlan.add(workout)
-                    budgetLeft -= tss
-                    Log.d(TAG, "  + Filler $type added on $date")
-                    break // Move to next day
-                }
-            }
-        }
-        
-        // Fallback: If remaining budget is high, try extending existing sessions
-        if (budgetLeft > budget * 0.2) {
-            val longRun = updatedPlan.find { it.type == WorkoutType.RUN && it.subType == "Long Run" }
-            if (longRun != null && budgetLeft > 20) {
-                val extendedDuration = longRun.durationMinutes + 15
-                val extendedTSS = (extendedDuration * 1.2).roundToInt()
-                val additionalTSS = extendedTSS - longRun.plannedTSS
+                val date = weekStart.plusDays(i.toLong())
                 
-                if (additionalTSS <= budgetLeft) {
-                    val extendedPlan = longRun.copy(
-                        durationMinutes = extendedDuration,
-                        plannedTSS = extendedTSS
+                // Skip if day already has a workout (preserves anchors)
+                if (updatedPlan.any { it.date == date }) continue
+                
+                // Check availability for RUN
+                val dayOfWeek = date.dayOfWeek
+                val availableTypes = profile.weeklyAvailability?.get(dayOfWeek) ?: listOf(WorkoutType.RUN, WorkoutType.BIKE, WorkoutType.SWIM)
+                if (WorkoutType.RUN !in availableTypes) continue
+                
+                // Validate placement
+                if (validatePlacement(date, WorkoutType.RUN, history + updatedPlan, recentRealLogs)) {
+                    val runTSS = 45 // Moderate intensity filler run
+                    val workout = createGhostPlan(
+                        date = date,
+                        type = WorkoutType.RUN,
+                        duration = 45,
+                        tss = runTSS
                     )
-                    updatedPlan.remove(longRun)
-                    updatedPlan.add(extendedPlan)
-                    budgetLeft -= additionalTSS
-                    Log.d(TAG, "  ↻ Extended Long Run to $extendedDuration min (fallback)")
+                    updatedPlan.add(workout)
+                    runTSSAdded += runTSS
+                    neededRun -= runTSS
+                    Log.d(TAG, "  + Run filler added on $date (${runTSS}TSS)")
                 }
             }
+            Log.d(TAG, "  ✅ Run filled: added=$runTSSAdded TSS, remaining=${budget.runTss - currentRunTSS - runTSSAdded} TSS")
         }
         
-        return Pair(updatedPlan, budgetLeft)
+        // Phase C: Bike Filling (Volume Filler)
+        var neededBike = budget.bikeTss - currentBikeTSS
+        if (neededBike > 0) {
+            Log.d(TAG, "  🚴 Filling Bike: needed=$neededBike TSS")
+            var bikeTSSAdded = 0
+            
+            for (i in 0..6) {
+                if (neededBike <= 0) break
+                
+                val date = weekStart.plusDays(i.toLong())
+                
+                // Skip if day already has a workout (preserves anchors)
+                if (updatedPlan.any { it.date == date }) continue
+                
+                // Check availability for BIKE
+                val dayOfWeek = date.dayOfWeek
+                val availableTypes = profile.weeklyAvailability?.get(dayOfWeek) ?: listOf(WorkoutType.RUN, WorkoutType.BIKE, WorkoutType.SWIM)
+                if (WorkoutType.BIKE !in availableTypes) continue
+                
+                // Validate placement
+                if (validatePlacement(date, WorkoutType.BIKE, history + updatedPlan, recentRealLogs)) {
+                    val bikeTSS = 40 // Easy-moderate filler bike
+                    val workout = createGhostPlan(
+                        date = date,
+                        type = WorkoutType.BIKE,
+                        duration = 45,
+                        tss = bikeTSS
+                    )
+                    updatedPlan.add(workout)
+                    bikeTSSAdded += bikeTSS
+                    neededBike -= bikeTSS
+                    Log.d(TAG, "  + Bike filler added on $date (${bikeTSS}TSS)")
+                }
+            }
+            Log.d(TAG, "  ✅ Bike filled: added=$bikeTSSAdded TSS, remaining=${budget.bikeTss - currentBikeTSS - bikeTSSAdded} TSS")
+        }
+        
+        // Phase D: Swim Filling
+        var neededSwim = budget.swimTss - currentSwimTSS
+        if (neededSwim > 0) {
+            Log.d(TAG, "  🏊 Filling Swim: needed=$neededSwim TSS")
+            var swimTSSAdded = 0
+            
+            for (i in 0..6) {
+                if (neededSwim <= 0) break
+                
+                val date = weekStart.plusDays(i.toLong())
+                
+                // Skip if day already has a workout (preserves anchors)
+                if (updatedPlan.any { it.date == date }) continue
+                
+                // Check availability for SWIM
+                val dayOfWeek = date.dayOfWeek
+                val availableTypes = profile.weeklyAvailability?.get(dayOfWeek) ?: listOf(WorkoutType.RUN, WorkoutType.BIKE, WorkoutType.SWIM)
+                if (WorkoutType.SWIM !in availableTypes) continue
+                
+                // Validate placement
+                if (validatePlacement(date, WorkoutType.SWIM, history + updatedPlan, recentRealLogs)) {
+                    val swimTSS = profile.defaultSwimTSS ?: 60
+                    val workout = createGhostPlan(
+                        date = date,
+                        type = WorkoutType.SWIM,
+                        duration = 60,
+                        tss = swimTSS
+                    )
+                    updatedPlan.add(workout)
+                    swimTSSAdded += swimTSS
+                    neededSwim -= swimTSS
+                    Log.d(TAG, "  + Swim filler added on $date (${swimTSS}TSS)")
+                }
+            }
+            Log.d(TAG, "  ✅ Swim filled: added=$swimTSSAdded TSS, remaining=${budget.swimTss - currentSwimTSS - swimTSSAdded} TSS")
+        }
+        
+        return updatedPlan
     }
 
     /**
@@ -667,6 +1050,65 @@ class CoachPlanGenerator @Inject constructor(
             plannedTSS = tss,
             strengthFocus = strengthFocus,
             intensity = intensity
+        )
+    }
+
+    /**
+     * Calculate discipline-specific TSS budgets based on total target, balance settings,
+     * strength sessions, and recent training load (for safety clamping).
+     * 
+     * @param totalTargetTSS Total weekly TSS target
+     * @param balance Training balance percentages (bike, run, swim)
+     * @param strengthSessions Number of strength sessions per week
+     * @param recentLoads Map of recent average weekly TSS per workout type (from last 4 weeks)
+     * @return DisciplineBudget with calculated TSS for each discipline
+     */
+    fun calculateDisciplineBudget(
+        totalTargetTSS: Int,
+        balance: TrainingBalance,
+        strengthSessions: Int,
+        recentLoads: Map<WorkoutType, Int>
+    ): DisciplineBudget {
+        // 1. Strength Tax Calculation
+        val strengthCost = strengthSessions * 50
+        val cardioBudget = maxOf(0, totalTargetTSS - strengthCost)
+
+        // 2. Base Split Application
+        val baseSwimTss = (cardioBudget * balance.swimPercent) / 100
+        val baseBikeTss = (cardioBudget * balance.bikePercent) / 100
+        val baseRunTss = (cardioBudget * balance.runPercent) / 100
+
+        // 3. Safety Clamp for Running
+        val recentRunAvg = recentLoads[WorkoutType.RUN] ?: 0
+        val maxSafeRun = ((recentRunAvg * 1.15).toInt()) + 15
+
+        val finalRunTss: Int
+        val finalBikeTss: Int
+
+        if (baseRunTss > maxSafeRun) {
+            // Cap run TSS at safe maximum
+            finalRunTss = maxSafeRun
+            // Add overflow to bike (low injury risk)
+            val overflow = baseRunTss - maxSafeRun
+            finalBikeTss = baseBikeTss + overflow
+        } else {
+            finalRunTss = baseRunTss
+            finalBikeTss = baseBikeTss
+        }
+
+        // 4. Final Values
+        val swimTss = baseSwimTss
+        val bikeTss = finalBikeTss
+        val runTss = finalRunTss
+        val strengthTss = strengthCost
+        val totalTss = swimTss + bikeTss + runTss + strengthTss
+
+        return DisciplineBudget(
+            swimTss = swimTss,
+            bikeTss = bikeTss,
+            runTss = runTss,
+            strengthTss = strengthTss,
+            totalTss = totalTss
         )
     }
 

@@ -101,39 +101,55 @@ class RecoveryRepositoryImpl @Inject constructor(
             wellnessDao.deleteTaskById(id)
         }
 
+    override suspend fun deleteAllLogs() =
+        withContext(Dispatchers.IO) {
+            wellnessDao.deleteAllLogs()
+        }
+
+    override suspend fun deleteAllTasks() =
+        withContext(Dispatchers.IO) {
+            wellnessDao.deleteAllTasks()
+        }
+
     // ==================== Initialization ====================
 
     override suspend fun initializeDefaults() = withContext(Dispatchers.IO) {
-        // Check if tasks table is empty
+        // Get existing tasks
         val existingTasks = wellnessDao.getAllTasksOnce()
+        val existingTitles = existingTasks.map { it.title.lowercase() }.toSet()
         
-        if (existingTasks.isEmpty()) {
-            // Insert standard default tasks
-            val defaultTasks = listOf(
-                WellnessTaskDefinition(
-                    id = 0,
-                    title = "Creatine",
-                    description = "Take creatine supplement",
-                    type = TaskTriggerType.DAILY,
-                    triggerThreshold = null
-                ),
-                WellnessTaskDefinition(
-                    id = 0,
-                    title = "Vitamins",
-                    description = "Take daily vitamins",
-                    type = TaskTriggerType.DAILY,
-                    triggerThreshold = null
-                ),
-                WellnessTaskDefinition(
-                    id = 0,
-                    title = "Stretching",
-                    description = "Perform daily stretching routine",
-                    type = TaskTriggerType.DAILY,
-                    triggerThreshold = null
-                )
+        // Define default tasks
+        val defaultTasks = listOf(
+            WellnessTaskDefinition(
+                id = 0,
+                title = "Creatine",
+                description = "Take creatine supplement",
+                type = TaskTriggerType.DAILY,
+                triggerThreshold = null
+            ),
+            WellnessTaskDefinition(
+                id = 0,
+                title = "Vitamins",
+                description = "Take daily vitamins",
+                type = TaskTriggerType.DAILY,
+                triggerThreshold = null
+            ),
+            WellnessTaskDefinition(
+                id = 0,
+                title = "Stretching",
+                description = "Perform daily stretching routine",
+                type = TaskTriggerType.DAILY,
+                triggerThreshold = null
             )
-            
-            wellnessDao.insertTasks(defaultTasks)
+        )
+        
+        // Only insert default tasks that don't already exist (by title)
+        val tasksToInsert = defaultTasks.filter { 
+            it.title.lowercase() !in existingTitles 
+        }
+        
+        if (tasksToInsert.isNotEmpty()) {
+            wellnessDao.insertTasks(tasksToInsert)
         }
     }
 }

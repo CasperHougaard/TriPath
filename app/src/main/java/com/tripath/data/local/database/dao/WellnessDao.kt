@@ -73,6 +73,12 @@ interface WellnessDao {
     @Delete
     suspend fun deleteLog(log: DailyWellnessLog)
 
+    /**
+     * Delete all daily wellness logs.
+     */
+    @Query("DELETE FROM daily_wellness_logs")
+    suspend fun deleteAllLogs()
+
     // WellnessTaskDefinition operations
 
     /**
@@ -122,4 +128,10 @@ interface WellnessDao {
      */
     @Query("DELETE FROM wellness_task_definitions WHERE id = :id")
     suspend fun deleteTaskById(id: Long)
+
+    /**
+     * Delete all wellness task definitions.
+     */
+    @Query("DELETE FROM wellness_task_definitions")
+    suspend fun deleteAllTasks()
 }

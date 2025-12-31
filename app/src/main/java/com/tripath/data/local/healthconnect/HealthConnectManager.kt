@@ -22,6 +22,7 @@ import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.entities.RawWorkoutData
 import com.tripath.data.local.database.entities.SleepLog
+import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.WorkoutType
 import com.tripath.domain.HeartRateSample
@@ -103,7 +104,8 @@ class HealthConnectManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: TrainingRepository,
     private val rawWorkoutDataDao: RawWorkoutDataDao,
-    private val sleepLogDao: SleepLogDao
+    private val sleepLogDao: SleepLogDao,
+    private val preferencesManager: PreferencesManager
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     
@@ -722,6 +724,16 @@ class HealthConnectManager @Inject constructor(
      */
     suspend fun syncSleep(daysToLookBack: Int = 30): Result<SleepSyncResult> = withContext(Dispatchers.IO) {
         try {
+            // Trigger backfill on first sync if not done yet
+            if (!preferencesManager.isSleepScoreBackfillDone()) {
+                backfillSleepScores().onSuccess {
+                    preferencesManager.setSleepScoreBackfillDone(true)
+                    Log.d("HealthConnect", "Sleep score backfill completed: $it records processed")
+                }.onFailure {
+                    Log.e("HealthConnect", "Sleep score backfill failed", it)
+                }
+            }
+            
             if (!isAvailable()) {
                 return@withContext Result.failure(IllegalStateException("Health Connect is not available"))
             }
@@ -782,6 +794,28 @@ class HealthConnectManager @Inject constructor(
                     .atZone(ZoneId.systemDefault())
                     .toLocalDate()
                 
+                // Extract or calculate sleep score
+                val garminScore = extractGarminSleepScore(session)
+                val calculatedScore = if (garminScore != null) {
+                    garminScore
+                } else {
+                    // Create temporary SleepLog for calculation
+                    val tempSleepLog = SleepLog(
+                        connectId = connectId,
+                        date = date,
+                        startTimeMillis = session.startTime.toEpochMilli(),
+                        endTimeMillis = session.endTime.toEpochMilli(),
+                        durationMinutes = durationMinutes,
+                        title = session.title,
+                        stagesJson = stagesJson,
+                        deepSleepMinutes = deepSleepMinutes,
+                        lightSleepMinutes = lightSleepMinutes,
+                        remSleepMinutes = remSleepMinutes,
+                        awakeMinutes = awakeMinutes
+                    )
+                    calculateSleepScore(tempSleepLog)
+                }
+                
                 val sleepLog = SleepLog(
                     connectId = connectId,
                     date = date,
@@ -793,7 +827,8 @@ class HealthConnectManager @Inject constructor(
                     deepSleepMinutes = deepSleepMinutes,
                     lightSleepMinutes = lightSleepMinutes,
                     remSleepMinutes = remSleepMinutes,
-                    awakeMinutes = awakeMinutes
+                    awakeMinutes = awakeMinutes,
+                    sleepScore = calculatedScore
                 )
                 
                 sleepLogDao.insert(sleepLog)
@@ -843,6 +878,189 @@ class HealthConnectManager @Inject constructor(
      */
     fun getAllSleepLogs(): Flow<List<SleepLog>> {
         return sleepLogDao.getAll()
+    }
+    
+    /**
+     * Extract Garmin sleep score from Health Connect session.
+     * Checks title field and metadata for score patterns.
+     */
+    private fun extractGarminSleepScore(session: SleepSessionRecord): Int? {
+        // Check title field for patterns like "Sleep Score: 85", "85/100", "Score 85"
+        session.title?.let { title ->
+            // Pattern 1: "Sleep Score: 85" or "Score: 85"
+            val pattern1 = Regex("(?:Sleep\\s+)?Score\\s*:?\\s*(\\d{1,3})", RegexOption.IGNORE_CASE)
+            pattern1.find(title)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+            
+            // Pattern 2: "85/100" format
+            val pattern2 = Regex("(\\d{1,3})/100")
+            pattern2.find(title)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+            
+            // Pattern 3: Just a number at the start or end
+            val pattern3 = Regex("(?:^|\\s)(\\d{1,3})(?:\\s|$)")
+            pattern3.find(title)?.groupValues?.get(1)?.toIntOrNull()?.let { score ->
+                if (score in 1..100) return score
+            }
+        }
+        
+        // Check metadata for structured data (if available)
+        // Note: Health Connect metadata may not expose Garmin-specific fields directly
+        // This is a placeholder for future metadata exploration
+        
+        return null
+    }
+    
+    /**
+     * Calculate sleep score (1-100) based on duration, stage quality, efficiency, and awakenings.
+     * Uses strength-focused weighting: Deep sleep (20pts) > REM (10pts) for muscle recovery.
+     * 
+     * Dynamic weighting: If stage data is missing, redistributes points to duration/efficiency.
+     */
+    fun calculateSleepScore(sleepLog: SleepLog): Int {
+        val durationMinutes = sleepLog.durationMinutes
+        val deepSleepMinutes = sleepLog.deepSleepMinutes ?: 0
+        val remSleepMinutes = sleepLog.remSleepMinutes ?: 0
+        val awakeMinutes = sleepLog.awakeMinutes ?: 0
+        val timeInBedMinutes = ((sleepLog.endTimeMillis - sleepLog.startTimeMillis) / 60000).toInt()
+        
+        // Check if we have stage data
+        val hasStageData = (deepSleepMinutes > 0 || remSleepMinutes > 0)
+        
+        // Component 1: Duration (40 points, or 60 if no stage data)
+        val durationMaxPoints = if (hasStageData) 40 else 60
+        val durationScore = when {
+            durationMinutes >= 480 && durationMinutes <= 540 -> durationMaxPoints.toFloat() // 8-9 hours optimal
+            durationMinutes >= 420 && durationMinutes < 480 -> {
+                // 7-8 hours: linear from 30 to 40
+                30f + ((durationMinutes - 420) / 60f) * 10f
+            }
+            durationMinutes > 540 && durationMinutes <= 600 -> {
+                // 9-10 hours: linear from 40 to 30
+                40f - ((durationMinutes - 540) / 60f) * 10f
+            }
+            durationMinutes >= 360 && durationMinutes < 420 -> {
+                // 6-7 hours: linear from 20 to 30
+                20f + ((durationMinutes - 360) / 60f) * 10f
+            }
+            durationMinutes > 600 && durationMinutes <= 660 -> {
+                // 10-11 hours: linear from 30 to 20
+                30f - ((durationMinutes - 600) / 60f) * 10f
+            }
+            durationMinutes < 360 -> {
+                // Less than 6 hours: linear from 0 to 20
+                (durationMinutes / 360f) * 20f
+            }
+            else -> {
+                // More than 11 hours: penalty
+                maxOf(0f, 20f - ((durationMinutes - 660) / 60f) * 5f)
+            }
+        }.coerceIn(0f, durationMaxPoints.toFloat())
+        
+        // Component 2: Stage Quality (30 points, or 0 if no stage data)
+        val stageScore = if (hasStageData && durationMinutes > 0) {
+            val deepSleepPercent = (deepSleepMinutes.toFloat() / durationMinutes) * 100f
+            val remSleepPercent = (remSleepMinutes.toFloat() / durationMinutes) * 100f
+            
+            // Deep Sleep (20 points): Target 15-20%
+            val deepScore = when {
+                deepSleepPercent >= 15f && deepSleepPercent <= 20f -> 20f
+                deepSleepPercent > 20f -> {
+                    // Above 20%: slight penalty
+                    20f - ((deepSleepPercent - 20f) / 10f) * 5f
+                }
+                deepSleepPercent > 10f -> {
+                    // 10-15%: linear from 10 to 20
+                    10f + ((deepSleepPercent - 10f) / 5f) * 10f
+                }
+                else -> {
+                    // Below 10%: linear from 0 to 10
+                    (deepSleepPercent / 10f) * 10f
+                }
+            }.coerceIn(0f, 20f)
+            
+            // REM Sleep (10 points): Target 20-25%
+            val remScore = when {
+                remSleepPercent >= 20f && remSleepPercent <= 25f -> 10f
+                remSleepPercent > 25f -> {
+                    // Above 25%: slight penalty
+                    10f - ((remSleepPercent - 25f) / 10f) * 3f
+                }
+                remSleepPercent > 15f -> {
+                    // 15-20%: linear from 7 to 10
+                    7f + ((remSleepPercent - 15f) / 5f) * 3f
+                }
+                else -> {
+                    // Below 15%: linear from 0 to 7
+                    (remSleepPercent / 15f) * 7f
+                }
+            }.coerceIn(0f, 10f)
+            
+            deepScore + remScore
+        } else {
+            0f
+        }
+        
+        // Component 3: Efficiency (20 points, or 30 if no stage data)
+        val efficiencyMaxPoints = if (hasStageData) 20 else 30
+        val efficiency = if (timeInBedMinutes > 0) {
+            (durationMinutes.toFloat() / timeInBedMinutes) * 100f
+        } else {
+            100f
+        }
+        val efficiencyScore = when {
+            efficiency >= 95f -> efficiencyMaxPoints.toFloat()
+            efficiency >= 85f -> {
+                // 85-95%: linear from 15 to 20
+                15f + ((efficiency - 85f) / 10f) * 5f
+            }
+            efficiency >= 75f -> {
+                // 75-85%: linear from 10 to 15
+                10f + ((efficiency - 75f) / 10f) * 5f
+            }
+            efficiency >= 65f -> {
+                // 65-75%: linear from 5 to 10
+                5f + ((efficiency - 65f) / 10f) * 5f
+            }
+            else -> {
+                // Below 65%: linear from 0 to 5
+                (efficiency / 65f) * 5f
+            }
+        }.coerceIn(0f, efficiencyMaxPoints.toFloat())
+        
+        // Component 4: Awakenings (10 points)
+        val awakeningScore = when {
+            awakeMinutes <= 5 -> 10f
+            awakeMinutes <= 15 -> 7f
+            awakeMinutes <= 30 -> 4f
+            else -> 1f
+        }
+        
+        // Sum all components and clamp to 1-100
+        val totalScore = (durationScore + stageScore + efficiencyScore + awakeningScore).toInt()
+        return totalScore.coerceIn(1, 100)
+    }
+    
+    /**
+     * Backfill sleep scores for existing sleep logs that don't have scores.
+     * This should be called once after migration to calculate scores for historical data.
+     */
+    suspend fun backfillSleepScores(): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val logsWithoutScore = sleepLogDao.getLogsWithoutScore()
+            var processedCount = 0
+            
+            // Process in batches to avoid blocking
+            logsWithoutScore.chunked(50).forEach { batch ->
+                batch.forEach { log ->
+                    val score = calculateSleepScore(log)
+                    sleepLogDao.updateSleepScore(log.connectId, score)
+                    processedCount++
+                }
+            }
+            
+            Result.success(processedCount)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }
 

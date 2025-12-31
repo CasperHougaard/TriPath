@@ -54,16 +54,23 @@ class MainActivity : ComponentActivity() {
             val isDarkTheme by preferencesManager.darkThemeFlow.collectAsState(initial = true)
             val view = LocalView.current
             
-            // Set navigation bar color to white for dark theme visibility
+            // Configure Android system status bar and navigation bar icons based on theme
             DisposableEffect(isDarkTheme) {
                 val windowInsetsController = WindowCompat.getInsetsController(window, view)
                 
-                // Set navigation bar color to white
-                @Suppress("DEPRECATION")
-                window.navigationBarColor = android.graphics.Color.WHITE
-                
-                // Enable light navigation bar (dark icons on white background)
-                windowInsetsController.isAppearanceLightNavigationBars = true
+                if (isDarkTheme) {
+                    // Dark theme: dark bars with bright icons
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                    windowInsetsController.isAppearanceLightNavigationBars = false
+                    windowInsetsController.isAppearanceLightStatusBars = false
+                } else {
+                    // Light theme: light bars with dark icons
+                    @Suppress("DEPRECATION")
+                    window.navigationBarColor = android.graphics.Color.WHITE
+                    windowInsetsController.isAppearanceLightNavigationBars = true
+                    windowInsetsController.isAppearanceLightStatusBars = true
+                }
                 
                 onDispose { }
             }

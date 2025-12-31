@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
+import com.tripath.data.model.AnchorType
 import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
@@ -41,6 +42,7 @@ class PreferencesManager @Inject constructor(
         private val DARK_THEME_KEY = booleanPreferencesKey("dark_theme")
         private val SYNC_DAYS_KEY = intPreferencesKey("sync_days_back")
         private val INCLUDE_IMPORTED_ACTIVITIES_KEY = booleanPreferencesKey("include_imported_activities")
+        private val SLEEP_SCORE_BACKFILL_DONE_KEY = booleanPreferencesKey("sleep_score_backfill_done")
         
         // UserProfile keys
         private val FTP_BIKE_KEY = intPreferencesKey("ftp_bike")
@@ -57,6 +59,7 @@ class PreferencesManager @Inject constructor(
         private val LONG_TRAINING_DAY_KEY = stringPreferencesKey("long_training_day")
         private val STRENGTH_DAYS_KEY = intPreferencesKey("strength_days")
         private val TRAINING_BALANCE_KEY = stringPreferencesKey("training_balance")
+        private val WEEKLY_SCHEDULE_KEY = stringPreferencesKey("weekly_schedule")
         
         // Coach Planning Settings keys
         private val IS_SMART_PLANNING_ENABLED_KEY = booleanPreferencesKey("is_smart_planning_enabled")
@@ -168,13 +171,15 @@ class PreferencesManager @Inject constructor(
         val longTrainingDayName = preferences[LONG_TRAINING_DAY_KEY]
         val strengthDays = preferences[STRENGTH_DAYS_KEY]
         val trainingBalanceJson = preferences[TRAINING_BALANCE_KEY]
+        val weeklyScheduleJson = preferences[WEEKLY_SCHEDULE_KEY]
 
         // If no fields are set, return null
         if (ftpBike == null && maxHeartRate == null && defaultSwimTSS == null &&
             defaultStrengthHeavyTSS == null && defaultStrengthLightTSS == null &&
             goalDateEpochDay == null && weeklyHoursGoal == null && lthr == null &&
             cssSecondsper100m == null && thresholdRunPace == null && weeklyAvailabilityJson == null &&
-            longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null
+            longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null &&
+            weeklyScheduleJson == null
         ) {
             return null
         }
@@ -206,6 +211,17 @@ class PreferencesManager @Inject constructor(
             }
         } ?: DayOfWeek.SUNDAY
 
+        val weeklySchedule = weeklyScheduleJson?.let { json ->
+            try {
+                val map = Json.decodeFromString<Map<String, String>>(json)
+                map.entries.associate { (day, anchorType) ->
+                    DayOfWeek.valueOf(day) to AnchorType.valueOf(anchorType)
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
         return UserProfile(
             ftpBike = ftpBike,
             maxHeartRate = maxHeartRate,
@@ -220,7 +236,8 @@ class PreferencesManager @Inject constructor(
             weeklyAvailability = weeklyAvailability,
             longTrainingDay = longTrainingDay,
             strengthDays = strengthDays ?: 2,
-            trainingBalance = trainingBalance
+            trainingBalance = trainingBalance,
+            weeklySchedule = weeklySchedule
         )
     }
 
@@ -267,6 +284,13 @@ class PreferencesManager @Inject constructor(
             profile.trainingBalance?.let { balance ->
                 preferences[TRAINING_BALANCE_KEY] = Json.encodeToString(balance)
             } ?: preferences.remove(TRAINING_BALANCE_KEY)
+
+            profile.weeklySchedule?.let { map ->
+                val stringMap = map.entries.associate { (day, anchorType) ->
+                    day.name to anchorType.name
+                }
+                preferences[WEEKLY_SCHEDULE_KEY] = Json.encodeToString(stringMap)
+            } ?: preferences.remove(WEEKLY_SCHEDULE_KEY)
         }
     }
 
@@ -289,6 +313,133 @@ class PreferencesManager @Inject constructor(
             preferences.remove(LONG_TRAINING_DAY_KEY)
             preferences.remove(STRENGTH_DAYS_KEY)
             preferences.remove(TRAINING_BALANCE_KEY)
+            preferences.remove(WEEKLY_SCHEDULE_KEY)
+        }
+    }
+
+    // ==================== Coach Planning Settings Operations ====================
+
+    /**
+     * Flow that emits the current smart planning enabled preference.
+     * Default is true (smart planning enabled).
+     */
+    val smartPlanningEnabledFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[IS_SMART_PLANNING_ENABLED_KEY] ?: true // Default to enabled
+    }
+
+    /**
+     * Set the smart planning enabled preference.
+     * @param enabled true to enable smart planning, false to disable
+     */
+    suspend fun setSmartPlanningEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[IS_SMART_PLANNING_ENABLED_KEY] = enabled
+        }
+    }
+
+    /**
+     * Flow that emits the current run consecutive allowed preference.
+     * Default is false (consecutive runs not allowed).
+     */
+    val runConsecutiveAllowedFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[RUN_CONSECUTIVE_ALLOWED_KEY] ?: false // Default to not allowed
+    }
+
+    /**
+     * Set the run consecutive allowed preference.
+     * @param allowed true to allow consecutive runs, false to block them
+     */
+    suspend fun setRunConsecutiveAllowed(allowed: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[RUN_CONSECUTIVE_ALLOWED_KEY] = allowed
+        }
+    }
+
+    /**
+     * Flow that emits the current strength spacing hours preference.
+     * Default is 48 hours.
+     */
+    val strengthSpacingHoursFlow: Flow<Int> = dataStore.data.map { preferences ->
+        preferences[STRENGTH_SPACING_HOURS_KEY] ?: 48 // Default to 48 hours
+    }
+
+    /**
+     * Set the strength spacing hours preference.
+     * @param hours Minimum hours between strength sessions
+     */
+    suspend fun setStrengthSpacingHours(hours: Int) {
+        dataStore.edit { preferences ->
+            preferences[STRENGTH_SPACING_HOURS_KEY] = hours
+        }
+    }
+
+    /**
+     * Flow that emits the current ramp rate limit preference.
+     * Default is 5.0% (5.0f).
+     */
+    val rampRateLimitFlow: Flow<Float> = dataStore.data.map { preferences ->
+        preferences[RAMP_RATE_LIMIT_KEY] ?: 5.0f // Default to 5%
+    }
+
+    /**
+     * Set the ramp rate limit preference.
+     * @param limit Maximum weekly TSS increase percentage
+     */
+    suspend fun setRampRateLimit(limit: Float) {
+        dataStore.edit { preferences ->
+            preferences[RAMP_RATE_LIMIT_KEY] = limit
+        }
+    }
+
+    /**
+     * Flow that emits the current mechanical load monitoring preference.
+     * Default is true (monitoring enabled).
+     */
+    val mechanicalLoadMonitoringFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[MECHANICAL_LOAD_MONITORING_KEY] ?: true // Default to enabled
+    }
+
+    /**
+     * Set the mechanical load monitoring preference.
+     * @param enabled true to enable mechanical load monitoring, false to disable
+     */
+    suspend fun setMechanicalLoadMonitoring(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[MECHANICAL_LOAD_MONITORING_KEY] = enabled
+        }
+    }
+
+    /**
+     * Flow that emits the current allow commute exemption preference.
+     * Default is true (commute exemption allowed).
+     */
+    val allowCommuteExemptionFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[ALLOW_COMMUTE_EXEMPTION_KEY] ?: true // Default to allowed
+    }
+
+    /**
+     * Set the allow commute exemption preference.
+     * @param allowed true to allow commute exemption, false to block it
+     */
+    suspend fun setAllowCommuteExemption(allowed: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[ALLOW_COMMUTE_EXEMPTION_KEY] = allowed
+        }
+    }
+    
+    /**
+     * Check if sleep score backfill has been completed.
+     */
+    suspend fun isSleepScoreBackfillDone(): Boolean {
+        return dataStore.data.first()[SLEEP_SCORE_BACKFILL_DONE_KEY] ?: false
+    }
+    
+    /**
+     * Mark sleep score backfill as completed.
+     */
+    suspend fun setSleepScoreBackfillDone(done: Boolean = true) {
+        dataStore.edit { preferences ->
+            preferences[SLEEP_SCORE_BACKFILL_DONE_KEY] = done
         }
     }
 }

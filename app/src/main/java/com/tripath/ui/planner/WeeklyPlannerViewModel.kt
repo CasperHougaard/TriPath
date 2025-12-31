@@ -143,6 +143,12 @@ class WeeklyPlannerViewModel @Inject constructor(
                         repository.getWorkoutLogsByDateRange(start, end),
                         repository.getSpecialPeriodsByDateRange(start, end)
                     ) { plans, logs, specialPeriods ->
+                        // Filter out training plans if Smart Planning is disabled
+                        val filteredPlans = if (smartPlanningEnabled) {
+                            plans
+                        } else {
+                            emptyList()
+                        }
                         val rows = (0 until numberOfWeeks).map { weekIndex ->
                             val weekStart = start.plusWeeks(weekIndex.toLong())
                             
@@ -153,7 +159,7 @@ class WeeklyPlannerViewModel @Inject constructor(
 
                             val daysOfWeek = (0 until 7).map { dayIndex ->
                                 val date = weekStart.plusDays(dayIndex.toLong())
-                                val dayPlans = plans.filter { it.date == date }
+                                val dayPlans = filteredPlans.filter { it.date == date }
                                 val dayLogs = logs.filter { it.date == date }
                                 val daySpecialPeriods = specialPeriods.filter { 
                                     (date >= it.startDate && date <= it.endDate)
@@ -169,7 +175,7 @@ class WeeklyPlannerViewModel @Inject constructor(
                                 )
                             }
 
-                            val weekPlans = plans.filter { it.date >= weekStart && it.date < weekStart.plusWeeks(1) }
+                            val weekPlans = filteredPlans.filter { it.date >= weekStart && it.date < weekStart.plusWeeks(1) }
                             val weekLogs = logs.filter { it.date >= weekStart && it.date < weekStart.plusWeeks(1) }
                             
                             val filteredWeekLogs = if (includeImported) {
@@ -220,13 +226,13 @@ class WeeklyPlannerViewModel @Inject constructor(
 
                         // Distribution
                         val totalDuration = if (includeImported) {
-                            plans.sumOf { it.durationMinutes } + logs.sumOf { it.durationMinutes }
+                            filteredPlans.sumOf { it.durationMinutes } + logs.sumOf { it.durationMinutes }
                         } else {
-                            plans.sumOf { it.durationMinutes }
+                            filteredPlans.sumOf { it.durationMinutes }
                         }
                         
                         val distribution = if (totalDuration > 0) {
-                            val planDistribution = plans.groupBy { it.type }
+                            val planDistribution = filteredPlans.groupBy { it.type }
                                 .mapValues { (_, workouts) ->
                                     workouts.sumOf { it.durationMinutes }.toFloat() / totalDuration.toFloat()
                                 }

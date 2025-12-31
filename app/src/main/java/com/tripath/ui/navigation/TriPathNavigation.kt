@@ -8,6 +8,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.tripath.ui.coach.CoachScreen
+import com.tripath.ui.coach.PlanningSettingsScreen
 import com.tripath.ui.dashboard.DashboardScreen
 import com.tripath.ui.planner.WeeklyPlannerScreen
 import com.tripath.ui.progress.ProgressScreen
@@ -33,6 +34,7 @@ sealed class Screen(val route: String) {
         }
     }
     object ProfileEditor : Screen("profile_editor")
+    object PlanningSettings : Screen("planning_settings")
     object Progress : Screen("progress") // Kept for backward compatibility or deep linking
     object WorkoutDetail : Screen("workout_detail/{workoutId}/{isPlanned}") {
         fun createRoute(workoutId: String, isPlanned: Boolean): String {
@@ -67,7 +69,12 @@ fun TriPathNavigation(
             StatsScreen()
         }
         composable(Screen.Coach.route) {
-            CoachScreen()
+            CoachScreen(navController = navController)
+        }
+        composable(Screen.PlanningSettings.route) {
+            PlanningSettingsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
         composable(Screen.Recovery.route) {
             RecoveryScreen(navController = navController)

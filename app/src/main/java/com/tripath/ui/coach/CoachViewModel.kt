@@ -2,19 +2,27 @@ package com.tripath.ui.coach
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tripath.data.local.database.entities.DailyWellnessLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
+import com.tripath.data.local.preferences.PreferencesManager
+import com.tripath.data.local.repository.RecoveryRepository
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.data.model.AllergySeverity
 import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
 import com.tripath.domain.CoachEngine
-import com.tripath.domain.CoachPlanGenerator
 import com.tripath.domain.PerformanceMetrics
 import com.tripath.domain.TrainingMetricsCalculator
 import com.tripath.domain.TrainingPhase
+import com.tripath.domain.toCoachPhase
+import com.tripath.domain.coach.CoachPlanGenerator
+import com.tripath.domain.coach.CoachWarning
+import com.tripath.domain.coach.ReadinessStatus
+import com.tripath.domain.coach.TrainingRulesEngine
 import com.tripath.ui.model.FormStatus
 import com.tripath.ui.model.PerformanceDataPoint
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,8 +31,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -38,6 +52,14 @@ private data class Data(
     val logs: List<WorkoutLog>
 )
 
+private data class ReadinessData(
+    val workoutLogs: List<WorkoutLog>,
+    val wellnessLog: DailyWellnessLog?,
+    val smartEnabled: Boolean,
+    val todayPlans: List<TrainingPlan>,
+    val profile: UserProfile?
+)
+
 data class CoachUiState(
     val currentPhase: TrainingPhase? = null,
     val activeSpecialPeriods: List<SpecialPeriod> = emptyList(),
@@ -48,29 +70,50 @@ data class CoachUiState(
     val goalDate: LocalDate? = null,
     val isLoading: Boolean = false,
     val formStatus: FormStatus = FormStatus.OPTIMAL,
-    val userProfile: UserProfile? = null,
-    
-    // Generation State
-    val isGenerating: Boolean = false,
-    val generatedBlock: List<TrainingPlan>? = null,
-    val showPlanConfirmation: Boolean = false,
-    val generationSummary: String = "",
-    val clearExistingOnConfirm: Boolean = false
+    val userProfile: UserProfile? = null
 )
 
 @HiltViewModel
 class CoachViewModel @Inject constructor(
     private val repository: TrainingRepository,
+    private val trainingRulesEngine: TrainingRulesEngine,
+    private val recoveryRepository: RecoveryRepository,
+    private val preferencesManager: PreferencesManager,
     private val coachPlanGenerator: CoachPlanGenerator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CoachUiState())
     val uiState: StateFlow<CoachUiState> = _uiState.asStateFlow()
 
+    // Readiness and alerts state flows
+    private val _readinessState = MutableStateFlow<ReadinessStatus?>(null)
+    val readinessState: StateFlow<ReadinessStatus?> = _readinessState.asStateFlow()
+    
+    private val _alertsState = MutableStateFlow<List<CoachWarning>>(emptyList())
+    val alertsState: StateFlow<List<CoachWarning>> = _alertsState.asStateFlow()
+    
+    // Generation state flows
+    private val _isGenerating = MutableStateFlow(false)
+    val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
+
+    private val _generationError = MutableStateFlow<String?>(null)
+    val generationError: StateFlow<String?> = _generationError.asStateFlow()
+
+    private val _generationSuccess = MutableStateFlow<Int?>(null) // Number of plans generated
+    val generationSuccess: StateFlow<Int?> = _generationSuccess.asStateFlow()
+    
+    val isSmartPlanningEnabled: StateFlow<Boolean> = preferencesManager.smartPlanningEnabledFlow
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = true
+        )
+
     private val shortDateFormatter = DateTimeFormatter.ofPattern("MMM d")
 
     init {
         loadCoachData()
+        loadReadinessData()
     }
 
     fun loadCoachData() {
@@ -141,6 +184,110 @@ class CoachViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Load readiness status and coach alerts using TrainingRulesEngine.
+     */
+    private fun loadReadinessData() {
+        viewModelScope.launch {
+            val today = LocalDate.now()
+            
+            combine(
+                repository.getAllWorkoutLogs(),
+                recoveryRepository.getWellnessLogFlow(today),
+                preferencesManager.smartPlanningEnabledFlow,
+                repository.getTrainingPlansByDateRange(today, today),
+                repository.getUserProfile()
+            ) { workoutLogs, wellnessLog, smartEnabled, todayPlans, profile ->
+                ReadinessData(
+                    workoutLogs = workoutLogs,
+                    wellnessLog = wellnessLog,
+                    smartEnabled = smartEnabled,
+                    todayPlans = todayPlans,
+                    profile = profile
+                )
+            }.collect { data ->
+                val today = LocalDate.now()
+                val workoutLogs = data.workoutLogs
+                
+                // Calculate readiness if smart planning is enabled
+                if (data.smartEnabled && data.profile != null) {
+                    // Get TSB from current metrics
+                    val chartLogs = workoutLogs.filter { !it.date.isAfter(today) }
+                    val currentMetrics = TrainingMetricsCalculator.calculatePerformanceMetrics(
+                        logs = chartLogs,
+                        targetDate = today
+                    )
+                    
+                    // Extract wellness data
+                    val wellness = data.wellnessLog ?: DailyWellnessLog(
+                        date = today,
+                        allergySeverity = AllergySeverity.NONE
+                    )
+                    
+                    val sleepHours = wellness.sleepMinutes?.div(60.0)
+                    val tsbInt = currentMetrics.tsb.roundToInt()
+                    
+                    // Calculate readiness
+                    val readiness = trainingRulesEngine.calculateReadiness(
+                        tsb = tsbInt,
+                        sleepHours = sleepHours,
+                        soreness = wellness.sorenessIndex,
+                        mood = wellness.moodIndex,
+                        allergy = wellness.allergySeverity ?: AllergySeverity.NONE
+                    )
+                    _readinessState.value = readiness
+                    
+                    // Validate daily plan
+                    val currentPhase = CoachEngine.calculatePhase(today, data.profile.goalDate)
+                    val coachPhase = currentPhase.toCoachPhase()
+                    
+                    // Get yesterday's workout
+                    val yesterday = workoutLogs.filter { it.date == today.minusDays(1) }.firstOrNull()
+                    
+                    // Get last strength date
+                    val lastStrengthDate = workoutLogs
+                        .filter { it.type == WorkoutType.STRENGTH }
+                        .maxOfOrNull { it.date }
+                    
+                    // Get recent runs (last 14 days for mechanical load comparison)
+                    val fourteenDaysAgo = today.minusDays(14)
+                    val recentRuns = workoutLogs.filter { log ->
+                        log.type == WorkoutType.RUN &&
+                        !log.date.isBefore(fourteenDaysAgo) &&
+                        !log.date.isAfter(today)
+                    }
+                    
+                    // For todayPlan, pass null as we're validating completed workouts
+                    // (Option A from plan - future enhancement can validate planned workouts)
+                    val warnings = trainingRulesEngine.validateDailyPlan(
+                        yesterday = yesterday,
+                        todayPlan = null, // Pass null as we only validate completed workouts for now
+                        todayWellness = wellness,
+                        lastStrengthDate = lastStrengthDate,
+                        currentPhase = coachPhase,
+                        recentRuns = recentRuns
+                    )
+                    _alertsState.value = warnings
+                } else {
+                    // Smart planning disabled - clear readiness and alerts
+                    _readinessState.value = null
+                    _alertsState.value = emptyList()
+                }
+            }
+        }
+    }
+
+    /**
+     * Generates coach assessment message based on phase, TSB, and special periods.
+     * 
+     * @deprecated This method uses hardcoded TSB thresholds (-40, -30, -10) that will be replaced
+     * with Preferences-based logic (see PlanningSettings). Hardcoded strength spacing (48h) 
+     * will also be replaced with user-configurable values. Will be replaced in Iron Brain refactor.
+     */
+    @Deprecated(
+        message = "Hardcoded TSB thresholds and strength spacing will be replaced with Preferences-based logic",
+        replaceWith = ReplaceWith("Preferences-based assessment logic (Iron Brain)")
+    )
     private fun generateCoachMessage(
         phase: TrainingPhase,
         tsb: Double,
@@ -163,18 +310,23 @@ class CoachViewModel @Inject constructor(
         }
 
         // Priority 2: Critical TSB Thresholds
+        // TODO: Replace hardcoded -40 threshold with Preferences-based value (Iron Brain)
         if (tsb < -40) {
             return "CRITICAL: Systemic fatigue is too high (TSB < -40). High risk of injury or overtraining. Skip high-intensity sessions today."
         }
         
         // Priority 3: Sweet Spot
+        // TODO: Replace hardcoded -30 to -10 thresholds with Preferences-based values (Iron Brain)
         if (tsb >= -30 && tsb <= -10) {
             return "Phase: ${phase.displayName}. You are in the Sweet Spot. Your body is absorbing the workload efficiently. Keep going."
         }
 
         // Priority 4: Phase-Specific Messaging
         return when (phase) {
-            TrainingPhase.OffSeason -> "Focus: Structural Integrity. Prioritize 48h rest between heavy strength sessions for muscle protein synthesis. Build raw strength now."
+            TrainingPhase.OffSeason -> {
+                // TODO: Replace hardcoded "48h" with Preferences.strengthSpacingHours value
+                "Focus: Structural Integrity. Prioritize 48h rest between heavy strength sessions for muscle protein synthesis. Build raw strength now."
+            }
             TrainingPhase.Base -> "Phase: Base. Focus on aerobic capacity, technique, and consistency. Keep intensity low and volume steady."
             TrainingPhase.Build -> "Phase: Build. Progressive overload is key. Hit your key sessions hard and respect recovery days."
             TrainingPhase.Peak -> "Phase: Peak. Specificity is highest now. Focus on race-pace intervals and simulation sessions."
@@ -252,65 +404,6 @@ class CoachViewModel @Inject constructor(
         }
     }
 
-    fun generateTrainingBlock(clearExisting: Boolean, allowMultipleActivitiesPerDay: Boolean = false) {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isGenerating = true)
-            
-            val ctl = _uiState.value.performanceMetrics.ctl
-            
-            // Calculate next Monday
-            val today = LocalDate.now()
-            val daysUntilMonday = when (today.dayOfWeek) {
-                java.time.DayOfWeek.MONDAY -> 7 // If today is Monday, use next Monday
-                else -> {
-                    val daysToAdd = 8 - today.dayOfWeek.value // Monday is 1, so 8 - value gives days until next Monday
-                    daysToAdd
-                }
-            }
-            val startDate = today.plusDays(daysUntilMonday.toLong())
-            
-            val block = coachPlanGenerator.generateBlock(startDate, ctl, clearExisting, allowMultipleActivitiesPerDay)
-            
-            val summary = "Generated ${block.size} sessions for the next 4 weeks.\n" +
-                    "Starting TSS: ${block.take(7).sumOf { it.plannedTSS }}\n" +
-                    "Focus: ${_uiState.value.currentPhase?.displayName ?: "General Fitness"}"
-
-            _uiState.value = _uiState.value.copy(
-                isGenerating = false,
-                generatedBlock = block,
-                showPlanConfirmation = true,
-                generationSummary = summary,
-                clearExistingOnConfirm = clearExisting
-            )
-        }
-    }
-
-    fun confirmTrainingBlock() {
-        val block = _uiState.value.generatedBlock ?: return
-        val clearExisting = _uiState.value.clearExistingOnConfirm
-        
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                if (clearExisting && block.isNotEmpty()) {
-                    val startDate = block.minOf { it.date }
-                    val endDate = block.maxOf { it.date }
-                    repository.deleteTrainingPlansByDateRange(startDate, endDate)
-                }
-                repository.insertTrainingPlans(block)
-            }
-            _uiState.value = _uiState.value.copy(
-                showPlanConfirmation = false,
-                generatedBlock = null
-            )
-        }
-    }
-
-    fun dismissTrainingBlock() {
-        _uiState.value = _uiState.value.copy(
-            showPlanConfirmation = false,
-            generatedBlock = null
-        )
-    }
 
     fun updateAvailability(
         weeklyAvailability: Map<DayOfWeek, List<WorkoutType>>,
@@ -331,5 +424,69 @@ class CoachViewModel @Inject constructor(
                 repository.upsertUserProfile(updatedProfile)
             }
         }
+    }
+
+    fun generateSeasonPlan(months: Int = 3) {
+        viewModelScope.launch {
+            _isGenerating.value = true
+            _generationError.value = null
+            _generationSuccess.value = null
+            
+            try {
+                withContext(Dispatchers.IO) {
+                    // Get current user profile
+                    val profile = repository.getUserProfileOnce()
+                    if (profile == null) {
+                        _generationError.value = "User profile not found. Please complete your profile."
+                        return@withContext
+                    }
+                    
+                    // Get current CTL from existing metrics
+                    val today = LocalDate.now()
+                    val allLogs = repository.getAllWorkoutLogsOnce()
+                    val currentMetrics = TrainingMetricsCalculator.calculatePerformanceMetrics(
+                        logs = allLogs,
+                        targetDate = today
+                    )
+                    val currentCtl = currentMetrics.ctl
+                    
+                    // Get recent logs for cold-start validation (last 14 days)
+                    val recentLogs = allLogs.filter { 
+                        !it.date.isBefore(today.minusDays(14)) && 
+                        !it.date.isAfter(today.minusDays(1))
+                    }
+                    
+                    // Generate the plan
+                    val generatedPlans = coachPlanGenerator.generateSeason(
+                        startDate = today,
+                        currentCtl = currentCtl,
+                        months = months,
+                        recentRealLogs = recentLogs
+                    )
+                    
+                    // Save to database
+                    if (generatedPlans.isNotEmpty()) {
+                        repository.insertTrainingPlans(generatedPlans)
+                        _generationSuccess.value = generatedPlans.size
+                    } else {
+                        // Empty list could mean validation failed
+                        _generationError.value = "Generation produced no plans. Please check your profile settings and goal date."
+                    }
+                }
+            } catch (e: Exception) {
+                _generationError.value = "Error generating plan: ${e.message}"
+                android.util.Log.e("CoachViewModel", "Generation error", e)
+            } finally {
+                _isGenerating.value = false
+            }
+        }
+    }
+
+    fun clearGenerationError() {
+        _generationError.value = null
+    }
+
+    fun clearGenerationSuccess() {
+        _generationSuccess.value = null
     }
 }

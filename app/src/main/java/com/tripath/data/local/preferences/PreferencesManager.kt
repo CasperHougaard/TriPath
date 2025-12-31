@@ -58,6 +58,14 @@ class PreferencesManager @Inject constructor(
         private val STRENGTH_DAYS_KEY = intPreferencesKey("strength_days")
         private val TRAINING_BALANCE_KEY = stringPreferencesKey("training_balance")
         
+        // Coach Planning Settings keys
+        private val IS_SMART_PLANNING_ENABLED_KEY = booleanPreferencesKey("is_smart_planning_enabled")
+        private val RUN_CONSECUTIVE_ALLOWED_KEY = booleanPreferencesKey("run_consecutive_allowed")
+        private val STRENGTH_SPACING_HOURS_KEY = intPreferencesKey("strength_spacing_hours")
+        private val RAMP_RATE_LIMIT_KEY = floatPreferencesKey("ramp_rate_limit")
+        private val MECHANICAL_LOAD_MONITORING_KEY = booleanPreferencesKey("mechanical_load_monitoring")
+        private val ALLOW_COMMUTE_EXEMPTION_KEY = booleanPreferencesKey("allow_commute_exemption")
+        
         /** Default sync period in days */
         const val DEFAULT_SYNC_DAYS = 30
     }

@@ -13,23 +13,25 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Hotel
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Luggage
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,12 +43,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
 import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.WorkoutType
 import com.tripath.ui.coach.components.CoachAssessmentCard
+import com.tripath.ui.coach.components.CoachAlertsList
 import com.tripath.ui.coach.components.PhaseTimeline
-import com.tripath.ui.coach.components.PlanSettingsCard
+import com.tripath.ui.coach.components.ReadinessBreakdownDialog
+import com.tripath.ui.coach.components.ReadinessCard
 import com.tripath.ui.coach.components.SpecialPeriodDialog
 import com.tripath.ui.coach.components.SpecialPeriodList
 import com.tripath.ui.components.SectionHeader
@@ -56,19 +61,45 @@ import com.tripath.ui.theme.TriPathTheme
 import java.time.DayOfWeek
 import java.time.LocalDate
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CoachScreen(
+    navController: NavHostController? = null,
     viewModel: CoachViewModel = hiltViewModel(),
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val readinessState by viewModel.readinessState.collectAsStateWithLifecycle()
+    val alertsState by viewModel.alertsState.collectAsStateWithLifecycle()
+    val isSmartPlanningEnabled by viewModel.isSmartPlanningEnabled.collectAsStateWithLifecycle()
+    val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
+    val generationError by viewModel.generationError.collectAsStateWithLifecycle()
+    val generationSuccess by viewModel.generationSuccess.collectAsStateWithLifecycle()
     
     var showSpecialPeriodDialog by remember { mutableStateOf(false) }
     var initialDialogType by remember { mutableStateOf(SpecialPeriodType.INJURY) }
-    var clearExisting by remember { mutableStateOf(false) }
-    var allowMultipleActivitiesPerDay by remember { mutableStateOf(false) }
+    var showReadinessBreakdown by remember { mutableStateOf(false) }
 
-    Scaffold(modifier = modifier) { paddingValues ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Coach") },
+                actions = {
+                    navController?.let {
+                        IconButton(
+                            onClick = { it.navigate(com.tripath.ui.navigation.Screen.PlanningSettings.route) }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Coach Settings"
+                            )
+                        }
+                    }
+                }
+            )
+        },
+        modifier = modifier
+    ) { paddingValues ->
         if (uiState.isLoading) {
             Column(
                 modifier = Modifier
@@ -97,6 +128,41 @@ fun CoachScreen(
                         subtitle = "Strategic Planning & Analysis"
                     )
 
+                    // Readiness Card and Alerts (if smart planning enabled)
+                    if (isSmartPlanningEnabled) {
+                        ReadinessCard(
+                            readinessStatus = readinessState,
+                            onClick = { showReadinessBreakdown = true },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        
+                        if (alertsState.isNotEmpty()) {
+                            SectionHeader(
+                                title = "Coach Alerts",
+                                subtitle = "Readiness Status"
+                            )
+                            CoachAlertsList(
+                                warnings = alertsState,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    } else {
+                        // Placeholder when smart planning is disabled
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                        ) {
+                            Text(
+                                text = "Smart Planning Disabled",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(Spacing.lg)
+                            )
+                        }
+                    }
+
                     // 1. Lifecycle Progress Timeline
                     PhaseTimeline(
                         currentDate = LocalDate.now(),
@@ -109,69 +175,7 @@ fun CoachScreen(
                         assessment = uiState.coachAssessment
                     )
 
-                    // 3. Plan Generation
-                    if (uiState.userProfile != null) {
-                        PlanSettingsCard(
-                            userProfile = uiState.userProfile!!,
-                            onUpdateSettings = { availability, longDay, strengthDays, balance ->
-                                viewModel.updateAvailability(availability, longDay, strengthDays, balance)
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Checkbox(
-                                checked = clearExisting,
-                                onCheckedChange = { clearExisting = it }
-                            )
-                            Text(
-                                text = "Clear existing plans for this period",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                        
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Checkbox(
-                                checked = allowMultipleActivitiesPerDay,
-                                onCheckedChange = { allowMultipleActivitiesPerDay = it }
-                            )
-                            Text(
-                                text = "Allow multiple activities per day",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-
-                        Button(
-                            onClick = { viewModel.generateTrainingBlock(clearExisting, allowMultipleActivitiesPerDay) },
-                            enabled = !uiState.isGenerating,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            )
-                        ) {
-                            if (uiState.isGenerating) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.padding(Spacing.sm))
-                                Text("Analyzing...")
-                            } else {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                                Spacer(modifier = Modifier.padding(Spacing.sm))
-                                Text("Generate Next Training Block")
-                            }
-                        }
-                    }
-
-                    // 4. Performance Pulse (CTL/ATL/TSB)
+                    // 3. Performance Pulse (CTL/ATL/TSB)
                     SectionHeader(
                         title = "Performance Pulse",
                         subtitle = "Fitness (CTL) vs Fatigue (ATL)"
@@ -218,6 +222,22 @@ fun CoachScreen(
                         )
                     }
                     
+                    // Auto-Pilot Generation
+                    SectionHeader(
+                        title = "Auto-Pilot Generation",
+                        subtitle = "Generate training plan using Iron Brain"
+                    )
+                    
+                    AutoPilotGenerationCard(
+                        isGenerating = isGenerating,
+                        generationError = generationError,
+                        generationSuccess = generationSuccess,
+                        onGenerate = { viewModel.generateSeasonPlan(months = 3) },
+                        onDismissError = { viewModel.clearGenerationError() },
+                        onDismissSuccess = { viewModel.clearGenerationSuccess() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
                     Spacer(modifier = Modifier.height(Spacing.xl))
                 }
             }
@@ -234,26 +254,117 @@ fun CoachScreen(
             )
         }
 
-        if (uiState.showPlanConfirmation) {
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissTrainingBlock() },
-                title = { Text("Training Plan Generated") },
-                text = { Text(uiState.generationSummary) },
-                confirmButton = {
-                    Button(
-                        onClick = { viewModel.confirmTrainingBlock() }
+        val currentReadinessState = readinessState
+        if (showReadinessBreakdown && currentReadinessState != null) {
+            ReadinessBreakdownDialog(
+                readinessStatus = currentReadinessState,
+                onDismiss = { showReadinessBreakdown = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun AutoPilotGenerationCard(
+    isGenerating: Boolean,
+    generationError: String?,
+    generationSuccess: Int?,
+    onGenerate: () -> Unit,
+    onDismissError: () -> Unit,
+    onDismissSuccess: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Text(
+                text = "Generate 3-Month Training Plan",
+                style = MaterialTheme.typography.titleMedium
+            )
+            
+            Text(
+                text = "Automatically generate a training plan based on your profile, current fitness, and Iron Brain rules.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+            
+            Button(
+                onClick = onGenerate,
+                enabled = !isGenerating,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (isGenerating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                    Spacer(modifier = Modifier.padding(Spacing.sm))
+                    Text("Generating...")
+                } else {
+                    Text("Generate Plan")
+                }
+            }
+            
+            // Show error if any
+            generationError?.let { error ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(Spacing.md),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Save Plan")
-                    }
-                },
-                dismissButton = {
-                    TextButton(
-                        onClick = { viewModel.dismissTrainingBlock() }
-                    ) {
-                        Text("Discard")
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onDismissError) {
+                            Text("Dismiss")
+                        }
                     }
                 }
-            )
+            }
+            
+            // Show success if any
+            generationSuccess?.let { count ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(Spacing.md),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Successfully generated $count training plans!",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onDismissSuccess) {
+                            Text("Dismiss")
+                        }
+                    }
+                }
+            }
         }
     }
 }

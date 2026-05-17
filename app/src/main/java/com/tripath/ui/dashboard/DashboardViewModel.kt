@@ -7,15 +7,19 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.healthconnect.HealthConnectManager
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.data.model.WorkoutType
 import com.tripath.domain.TrainingMetricsCalculator
 import com.tripath.ui.model.FormStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
@@ -24,9 +28,39 @@ import java.time.LocalTime
 import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
 
+private fun currentWeekStart(): LocalDate =
+    LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+
+private data class DashboardWeekSelection(
+    val visibleWeekStart: LocalDate = currentWeekStart(),
+    val selectedDate: LocalDate = LocalDate.now()
+)
+
 enum class SyncStatus {
     IDLE, SYNCING, SUCCESS, ERROR
 }
+
+enum class DashboardActivityDisplayState {
+    NONE,
+    PLANNED,
+    COMPLETED,
+    MIXED
+}
+
+data class DashboardActivityCellState(
+    val workoutType: WorkoutType,
+    val displayMinutes: Int = 0,
+    val plannedMinutes: Int = 0,
+    val completedMinutes: Int = 0,
+    val displayState: DashboardActivityDisplayState = DashboardActivityDisplayState.NONE
+)
+
+data class DashboardDayColumnState(
+    val date: LocalDate,
+    val isToday: Boolean,
+    val isSelected: Boolean,
+    val cells: List<DashboardActivityCellState>
+)
 
 data class DayStatus(
     val date: LocalDate,
@@ -41,6 +75,7 @@ data class DashboardUiState(
     val weeklyPlannedTSS: Int = 0,
     val weeklyActualTSS: Int = 0,
     val weeklyLoadProgress: Float = 0f,
+    val visibleWeekStart: LocalDate = currentWeekStart(),
     val selectedDate: LocalDate = LocalDate.now(),
     val selectedDatePlan: TrainingPlan? = null,
     val selectedDateLogs: List<WorkoutLog> = emptyList(),
@@ -52,6 +87,7 @@ data class DashboardUiState(
     val syncError: String? = null,
     val lastSyncTimestamp: Long? = null,
     val weekDayStatuses: List<DayStatus> = emptyList(),
+    val weekColumns: List<DashboardDayColumnState> = emptyList(),
     val greeting: String = "Good Morning",
     // Performance Metrics (Banister Impulse Response Model)
     val ctl: Double = 0.0,  // Chronic Training Load (Fitness)
@@ -61,7 +97,18 @@ data class DashboardUiState(
     val weeklyAllowedTSS: Int = 0
 )
 
+private val dashboardWorkoutOrder = listOf(
+    WorkoutType.STRENGTH,
+    WorkoutType.RUN,
+    WorkoutType.BIKE,
+    WorkoutType.HIKE,
+    WorkoutType.WALK,
+    WorkoutType.SWIM,
+    WorkoutType.OTHER
+)
+
 @HiltViewModel
+@OptIn(ExperimentalCoroutinesApi::class)
 class DashboardViewModel @Inject constructor(
     private val repository: TrainingRepository,
     private val healthConnectManager: HealthConnectManager,
@@ -71,7 +118,7 @@ class DashboardViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
-    private val _selectedDate = MutableStateFlow(LocalDate.now())
+    private val _weekSelection = MutableStateFlow(DashboardWeekSelection())
 
     init {
         checkPermissionsAndSync()
@@ -81,7 +128,15 @@ class DashboardViewModel @Inject constructor(
     }
 
     fun selectDate(date: LocalDate) {
-        _selectedDate.value = date
+        _weekSelection.value = _weekSelection.value.copy(selectedDate = date)
+    }
+
+    fun showPreviousWeek() {
+        shiftVisibleWeek(weeks = -1)
+    }
+
+    fun showNextWeek() {
+        shiftVisibleWeek(weeks = 1)
     }
 
     private fun updateGreeting() {
@@ -133,14 +188,22 @@ class DashboardViewModel @Inject constructor(
      */
     private fun checkPermissionsAndSync() {
         viewModelScope.launch {
-            val hasPermissions = healthConnectManager.hasAllPermissions()
-            
-            _uiState.value = _uiState.value.copy(
-                hasHealthConnectPermissions = hasPermissions
-            )
-            
-            if (hasPermissions) {
-                syncWorkoutsFromHealthConnect()
+            try {
+                val hasPermissions = healthConnectManager.hasAllPermissions()
+
+                _uiState.value = _uiState.value.copy(
+                    hasHealthConnectPermissions = hasPermissions
+                )
+
+                if (hasPermissions) {
+                    syncWorkoutsFromHealthConnect()
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    hasHealthConnectPermissions = false,
+                    syncStatus = SyncStatus.ERROR,
+                    syncError = e.message ?: "Unable to start Health Connect sync"
+                )
             }
         }
     }
@@ -174,8 +237,8 @@ class DashboardViewModel @Inject constructor(
                         syncStatus = SyncStatus.SUCCESS,
                         lastSyncTimestamp = System.currentTimeMillis()
                     )
-                    // Reload dashboard data and performance metrics to reflect new workouts
-                    loadDashboardData()
+                    // Dashboard flows already observe the underlying Room tables, so avoid
+                    // creating duplicate collectors here. Only refresh the computed metrics.
                     loadPerformanceMetrics()
                     
                     // Reset success status after a delay
@@ -219,17 +282,25 @@ class DashboardViewModel @Inject constructor(
     private fun loadDashboardData() {
         viewModelScope.launch {
             val today = LocalDate.now()
-            
-            // Calculate current week (Monday to Sunday)
-            val weekStart = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-            val weekEnd = weekStart.plusDays(6)
 
-            // Combine flows for weekly data
-            combine(
-                repository.getTrainingPlansByDateRange(weekStart, weekEnd),
-                repository.getWorkoutLogsByDateRange(weekStart, weekEnd),
-                _selectedDate
-            ) { plans, logs, selectedDate ->
+            _weekSelection.flatMapLatest { selection ->
+                val weekStart = selection.visibleWeekStart
+                val weekEnd = weekStart.plusDays(6)
+
+                combine(
+                    repository.getTrainingPlansByDateRange(weekStart, weekEnd),
+                    repository.getWorkoutLogsByDateRange(weekStart, weekEnd)
+                ) { plans, logs ->
+                    Triple(selection, plans, logs)
+                }
+            }.catch { e ->
+                _uiState.value = _uiState.value.copy(
+                    syncStatus = SyncStatus.ERROR,
+                    syncError = e.message ?: "Unable to load dashboard data"
+                )
+            }.collect { (selection, plans, logs) ->
+                val weekStart = selection.visibleWeekStart
+                val selectedDate = selection.selectedDate
                 // Calculate weekly TSS
                 val plannedTSS = plans.sumOf { it.plannedTSS }
                 val actualTSS = logs.sumOf { (it.computedTSS ?: 0) }
@@ -269,22 +340,73 @@ class DashboardViewModel @Inject constructor(
                     )
                 }
 
+                val weekColumns = (0..6).map { i ->
+                    val date = weekStart.plusDays(i.toLong())
+                    val dayPlans = plans.filter { it.date == date }
+                    val dayLogs = logs.filter { it.date == date }
+
+                    DashboardDayColumnState(
+                        date = date,
+                        isToday = date == today,
+                        isSelected = date == selectedDate,
+                        cells = dashboardWorkoutOrder.map { workoutType ->
+                            val plannedMinutes = dayPlans
+                                .filter { it.type == workoutType }
+                                .sumOf { it.durationMinutes }
+                            val completedMinutes = dayLogs
+                                .filter { it.type == workoutType }
+                                .sumOf { it.durationMinutes }
+                            val displayState = when {
+                                completedMinutes > 0 && plannedMinutes > 0 -> DashboardActivityDisplayState.MIXED
+                                completedMinutes > 0 -> DashboardActivityDisplayState.COMPLETED
+                                plannedMinutes > 0 -> DashboardActivityDisplayState.PLANNED
+                                else -> DashboardActivityDisplayState.NONE
+                            }
+                            val displayMinutes = when (displayState) {
+                                DashboardActivityDisplayState.MIXED -> maxOf(plannedMinutes, completedMinutes)
+                                DashboardActivityDisplayState.COMPLETED -> completedMinutes
+                                DashboardActivityDisplayState.PLANNED -> plannedMinutes
+                                DashboardActivityDisplayState.NONE -> 0
+                            }
+
+                            DashboardActivityCellState(
+                                workoutType = workoutType,
+                                displayMinutes = displayMinutes,
+                                plannedMinutes = plannedMinutes,
+                                completedMinutes = completedMinutes,
+                                displayState = displayState
+                            )
+                        }
+                    )
+                }
+
                 // Preserve Health Connect sync state when updating dashboard data
-                _uiState.value.copy(
+                _uiState.value = _uiState.value.copy(
                     weeklyPlannedTSS = plannedTSS,
                     weeklyActualTSS = actualTSS,
                     weeklyLoadProgress = progress,
+                    visibleWeekStart = weekStart,
                     selectedDate = selectedDate,
                     selectedDatePlan = selectedDatePlan,
                     selectedDateLogs = selectedDateLogs,
                     isRestDay = isRestDay,
                     restDayMessage = if (isRestDay) "Active Recovery" else "Rest Day",
                     isWorkoutCompleted = isCompleted,
-                    weekDayStatuses = weekDayStatuses
+                    weekDayStatuses = weekDayStatuses,
+                    weekColumns = weekColumns
                 )
-            }.collect { state ->
-                _uiState.value = state
             }
         }
+    }
+
+    private fun shiftVisibleWeek(weeks: Long) {
+        val currentSelection = _weekSelection.value
+        val newWeekStart = currentSelection.visibleWeekStart.plusWeeks(weeks)
+        val dayOffset = currentSelection.selectedDate.dayOfWeek.value - DayOfWeek.MONDAY.value
+
+        _weekSelection.value = currentSelection.copy(
+            visibleWeekStart = newWeekStart,
+            selectedDate = newWeekStart.plusDays(dayOffset.toLong())
+        )
     }
 }

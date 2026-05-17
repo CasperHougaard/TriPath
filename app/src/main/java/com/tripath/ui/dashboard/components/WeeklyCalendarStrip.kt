@@ -34,7 +34,7 @@ fun WeeklyCalendarStrip(
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceEvenly // Center columns under matrix
     ) {
         weekDayStatuses.forEach { status ->
             DayStatusItem(

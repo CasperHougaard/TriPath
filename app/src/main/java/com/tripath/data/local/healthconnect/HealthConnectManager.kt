@@ -394,10 +394,8 @@ class HealthConnectManager @Inject constructor(
             ExerciseSessionRecord.EXERCISE_TYPE_BOOT_CAMP -> WorkoutType.STRENGTH
             
             // Non-specific cardio activities -> OTHER to prevent data pollution
-            ExerciseSessionRecord.EXERCISE_TYPE_WALKING,
-            ExerciseSessionRecord.EXERCISE_TYPE_HIKING,
-            ExerciseSessionRecord.EXERCISE_TYPE_ROWING,
-            ExerciseSessionRecord.EXERCISE_TYPE_SKATING -> WorkoutType.OTHER
+            ExerciseSessionRecord.EXERCISE_TYPE_WALKING -> WorkoutType.WALK
+            ExerciseSessionRecord.EXERCISE_TYPE_HIKING -> WorkoutType.HIKE
             
             else -> null // Ignore unsupported exercise types
         }
@@ -506,83 +504,110 @@ class HealthConnectManager @Inject constructor(
             var alreadySyncedCount = 0
             var skippedUnsupportedCount = 0
             var routeBackfilledCount = 0
+            var sessionErrorCount = 0
             val newWorkouts = mutableListOf<WorkoutLog>()
 
             for (session in rawSessions) {
                 val connectId = session.metadata.id
-                
-                // Check if already stored in raw data table
-                val existingData = rawWorkoutDataDao.getByConnectId(connectId)
-                if (existingData != null) {
-                    // Check if we need to backfill route data
-                    if (existingData.routeJson == null) {
-                        val routeJson = readRouteForSession(session)
-                        if (routeJson != null) {
-                            rawWorkoutDataDao.updateRoute(connectId, routeJson)
-                            routeBackfilledCount++
-                            Log.d("HealthConnect", "Backfilled route data for $connectId")
+                try {
+                    // Check if already stored in raw data table
+                    val existingData = rawWorkoutDataDao.getByConnectId(connectId)
+                    if (existingData != null) {
+                        // Check if we need to backfill route data
+                        if (existingData.routeJson == null) {
+                            val routeJson = readRouteForSession(session)
+                            if (routeJson != null) {
+                                rawWorkoutDataDao.updateRoute(connectId, routeJson)
+                                routeBackfilledCount++
+                                Log.d("HealthConnect", "Backfilled route data for $connectId")
+                            }
                         }
+
+                        val existingLog = repository.getWorkoutLogByConnectId(connectId)
+                        if (existingLog == null) {
+                            val recoveredWorkout = rebuildWorkoutLogFromRawData(existingData, userProfile)
+                            repository.insertWorkoutLog(recoveredWorkout)
+                            newWorkouts.add(recoveredWorkout)
+                            newlyImportedCount++
+                        } else {
+                            alreadySyncedCount++
+                        }
+                        continue
                     }
-                    alreadySyncedCount++
-                    continue
+
+                    val workoutType = mapExerciseType(session.exerciseType)
+                    if (workoutType == null) {
+                        skippedUnsupportedCount++
+                        continue
+                    }
+
+                    // 1. Fetch all raw data associated with this session
+                    val (avgHeartRate, hrSamples) = readHeartRateForSession(session.startTime, session.endTime)
+                    val (avgPower, powerSamples) = readPowerForSession(session.startTime, session.endTime)
+                    val calories = readCaloriesForSession(session.startTime, session.endTime)
+                    val distance = readDistanceForSession(session.startTime, session.endTime)
+                    readSpeedForSession(session.startTime, session.endTime)
+                    val steps = readStepsForSession(session.startTime, session.endTime)
+                    val routeJson = readRouteForSession(session)
+
+                    // 2. Serialize samples on Default dispatcher
+                    val hrSamplesJson = if (hrSamples.isNotEmpty()) {
+                        withContext(Dispatchers.Default) { json.encodeToString(hrSamples) }
+                    } else null
+                    
+                    val powerSamplesJson = if (powerSamples.isNotEmpty()) {
+                        withContext(Dispatchers.Default) { json.encodeToString(powerSamples) }
+                    } else null
+
+                    // 3. Check storage size and log warning if > 100KB
+                    val totalJsonSize = (hrSamplesJson?.length ?: 0) + (powerSamplesJson?.length ?: 0) + (routeJson?.length ?: 0)
+                    if (totalJsonSize > 100_000) {
+                        Log.w("HealthConnect", "Large workout data: ${totalJsonSize / 1024}KB for session $connectId (HR: ${hrSamplesJson?.length ?: 0}, Power: ${powerSamplesJson?.length ?: 0}, Route: ${routeJson?.length ?: 0})")
+                    }
+
+                    // 4. Build raw data and process it before persisting so a failed workout
+                    // import does not leave a raw-only orphan that future syncs skip.
+                    val rawData = RawWorkoutData(
+                        connectId = connectId,
+                        rawExerciseType = session.exerciseType,
+                        startTimeMillis = session.startTime.toEpochMilli(),
+                        endTimeMillis = session.endTime.toEpochMilli(),
+                        hrSamplesJson = hrSamplesJson,
+                        powerSamplesJson = powerSamplesJson,
+                        rawCalories = calories,
+                        rawDistanceMeters = distance,
+                        rawSteps = steps,
+                        routeJson = routeJson
+                    )
+
+                    // 5. Process into WorkoutLog using current UserProfile
+                    val workoutLog = processRawDataToWorkoutLog(
+                        rawData = rawData,
+                        hrSamples = hrSamples,
+                        powerSamples = powerSamples,
+                        userProfile = userProfile
+                    )
+
+                    rawWorkoutDataDao.insert(rawData)
+                    repository.insertWorkoutLog(workoutLog)
+                    newWorkouts.add(workoutLog)
+                    newlyImportedCount++
+                } catch (e: Exception) {
+                    sessionErrorCount++
+                    Log.e("HealthConnect", "Error syncing workout session $connectId", e)
                 }
+            }
 
-                val workoutType = mapExerciseType(session.exerciseType)
-                if (workoutType == null) {
-                    skippedUnsupportedCount++
-                    continue
-                }
-
-                // 1. Fetch all raw data associated with this session
-                val (avgHeartRate, hrSamples) = readHeartRateForSession(session.startTime, session.endTime)
-                val (avgPower, powerSamples) = readPowerForSession(session.startTime, session.endTime)
-                val calories = readCaloriesForSession(session.startTime, session.endTime)
-                val distance = readDistanceForSession(session.startTime, session.endTime)
-                val speed = readSpeedForSession(session.startTime, session.endTime)
-                val steps = readStepsForSession(session.startTime, session.endTime)
-                val routeJson = readRouteForSession(session)
-
-                // 2. Serialize samples on Default dispatcher
-                val hrSamplesJson = if (hrSamples.isNotEmpty()) {
-                    withContext(Dispatchers.Default) { json.encodeToString(hrSamples) }
-                } else null
-                
-                val powerSamplesJson = if (powerSamples.isNotEmpty()) {
-                    withContext(Dispatchers.Default) { json.encodeToString(powerSamples) }
-                } else null
-
-                // 3. Check storage size and log warning if > 100KB
-                val totalJsonSize = (hrSamplesJson?.length ?: 0) + (powerSamplesJson?.length ?: 0) + (routeJson?.length ?: 0)
-                if (totalJsonSize > 100_000) {
-                    Log.w("HealthConnect", "Large workout data: ${totalJsonSize / 1024}KB for session $connectId (HR: ${hrSamplesJson?.length ?: 0}, Power: ${powerSamplesJson?.length ?: 0}, Route: ${routeJson?.length ?: 0})")
-                }
-
-                // 4. Store in RawWorkoutData table
-                val rawData = RawWorkoutData(
-                    connectId = connectId,
-                    rawExerciseType = session.exerciseType,
-                    startTimeMillis = session.startTime.toEpochMilli(),
-                    endTimeMillis = session.endTime.toEpochMilli(),
-                    hrSamplesJson = hrSamplesJson,
-                    powerSamplesJson = powerSamplesJson,
-                    rawCalories = calories,
-                    rawDistanceMeters = distance,
-                    rawSteps = steps,
-                    routeJson = routeJson
+            if (
+                sessionErrorCount > 0 &&
+                newlyImportedCount == 0 &&
+                alreadySyncedCount == 0 &&
+                skippedUnsupportedCount == 0 &&
+                routeBackfilledCount == 0
+            ) {
+                return@withContext Result.failure(
+                    IllegalStateException("Failed to sync workouts from Health Connect")
                 )
-                rawWorkoutDataDao.insert(rawData)
-
-                // 5. Process into WorkoutLog using current UserProfile
-                val workoutLog = processRawDataToWorkoutLog(
-                    rawData = rawData,
-                    hrSamples = hrSamples,
-                    powerSamples = powerSamples,
-                    userProfile = userProfile
-                )
-                
-                repository.insertWorkoutLog(workoutLog)
-                newWorkouts.add(workoutLog)
-                newlyImportedCount++
             }
             
             Result.success(SyncResult(
@@ -660,6 +685,34 @@ class HealthConnectManager @Inject constructor(
             steps = rawData.rawSteps,
             hrZoneDistribution = hrZoneDistribution,
             powerZoneDistribution = powerZoneDistribution
+        )
+    }
+
+    private suspend fun rebuildWorkoutLogFromRawData(
+        rawData: RawWorkoutData,
+        userProfile: UserProfile
+    ): WorkoutLog {
+        val hrSamples = if (!rawData.hrSamplesJson.isNullOrEmpty()) {
+            withContext(Dispatchers.Default) {
+                json.decodeFromString<List<HeartRateSample>>(rawData.hrSamplesJson)
+            }
+        } else {
+            emptyList()
+        }
+
+        val powerSamples = if (!rawData.powerSamplesJson.isNullOrEmpty()) {
+            withContext(Dispatchers.Default) {
+                json.decodeFromString<List<PowerSample>>(rawData.powerSamplesJson)
+            }
+        } else {
+            emptyList()
+        }
+
+        return processRawDataToWorkoutLog(
+            rawData = rawData,
+            hrSamples = hrSamples,
+            powerSamples = powerSamples,
+            userProfile = userProfile
         )
     }
 

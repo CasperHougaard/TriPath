@@ -15,6 +15,11 @@ import java.time.LocalDate
  */
 class Converters {
 
+    private inline fun <reified T : Enum<T>> parseEnum(name: String?): T? {
+        if (name.isNullOrBlank()) return null
+        return enumValues<T>().firstOrNull { it.name.equals(name, ignoreCase = true) }
+    }
+
     // Map<String, Int> converters for zone distributions
     @TypeConverter
     fun fromZoneDistribution(distribution: Map<String, Int>?): String? {
@@ -23,7 +28,12 @@ class Converters {
 
     @TypeConverter
     fun toZoneDistribution(json: String?): Map<String, Int>? {
-        return json?.let { Json.decodeFromString(it) }
+        if (json.isNullOrBlank()) return null
+        return try {
+            Json.decodeFromString<Map<String, Int>>(json)
+        } catch (e: Exception) {
+            null
+        }
     }
 
     // LocalDate converters - uses epoch days for storage
@@ -45,7 +55,7 @@ class Converters {
 
     @TypeConverter
     fun toWorkoutType(name: String?): WorkoutType? {
-        return name?.let { WorkoutType.valueOf(it) }
+        return parseEnum<WorkoutType>(name)
     }
 
     // StrengthFocus converters
@@ -56,7 +66,7 @@ class Converters {
 
     @TypeConverter
     fun toStrengthFocus(name: String?): StrengthFocus? {
-        return name?.let { StrengthFocus.valueOf(it) }
+        return parseEnum<StrengthFocus>(name)
     }
 
     // Intensity converters
@@ -67,7 +77,7 @@ class Converters {
 
     @TypeConverter
     fun toIntensity(name: String?): Intensity? {
-        return name?.let { Intensity.valueOf(it) }
+        return parseEnum<Intensity>(name)
     }
 
     // AllergySeverity converters
@@ -78,7 +88,7 @@ class Converters {
 
     @TypeConverter
     fun toAllergySeverity(name: String?): AllergySeverity? {
-        return name?.let { AllergySeverity.valueOf(it) }
+        return parseEnum<AllergySeverity>(name)
     }
 
     // TaskTriggerType converters
@@ -89,7 +99,7 @@ class Converters {
 
     @TypeConverter
     fun toTaskTriggerType(name: String?): TaskTriggerType? {
-        return name?.let { TaskTriggerType.valueOf(it) }
+        return parseEnum<TaskTriggerType>(name)
     }
 
     // List<Long> converters for completedTaskIds

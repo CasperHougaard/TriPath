@@ -32,6 +32,7 @@ import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
 import com.tripath.ui.theme.IconSize
+import com.tripath.ui.theme.plannedContentTint
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import com.tripath.ui.theme.toColor
@@ -46,33 +47,14 @@ fun WorkoutCard(
 ) {
     val workoutColor = workout.type.toColor()
     val icon = getWorkoutIcon(workout.type)
-    
-    // For planned workouts, use outlined style; for completed, use solid style with sport color background
-    val containerColor = if (isPlanned) {
-        MaterialTheme.colorScheme.surface // Surface background for planned workouts
-    } else {
-        workoutColor // Solid sport color background for completed workouts
-    }
-    
+    val plannedGrey = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+    val plannedTint = workout.plannedContentTint(MaterialTheme.colorScheme.onSurface)
+    // For planned workouts, use grey; for completed, use sport color background
+    val containerColor = if (isPlanned) plannedGrey else workoutColor
     val contentAlpha = if (isPlanned) 0.8f else 1.0f
-    val textColor = if (isPlanned) {
-        workoutColor.copy(alpha = contentAlpha) // Sport color text for planned
-    } else {
-        Color.White.copy(alpha = contentAlpha) // White text for completed
-    }
-    
-    val iconTint = if (isPlanned) {
-        workoutColor.copy(alpha = contentAlpha) // Sport color icon for planned
-    } else {
-        Color.White.copy(alpha = contentAlpha) // White icon for completed
-    }
-    
-    val secondaryTextColor = if (isPlanned) {
-        workoutColor.copy(alpha = 0.7f * contentAlpha) // Sport color (lighter) for planned
-    } else {
-        Color.White.copy(alpha = 0.7f * contentAlpha) // White (lighter) for completed
-    }
-
+    val textColor = if (isPlanned) plannedTint else Color.White.copy(alpha = contentAlpha)
+    val iconTint = if (isPlanned) plannedTint else Color.White.copy(alpha = contentAlpha)
+    val secondaryTextColor = if (isPlanned) plannedTint.copy(alpha = (plannedTint.alpha * 0.9f).coerceAtMost(1f)) else Color.White.copy(alpha = 0.7f * contentAlpha)
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -81,7 +63,7 @@ fun WorkoutCard(
         border = if (isPlanned) {
             BorderStroke(
                 width = 2.dp,
-                color = workoutColor.copy(alpha = contentAlpha)
+                color = plannedGrey
             )
         } else {
             null
@@ -159,6 +141,8 @@ private fun getWorkoutIcon(type: WorkoutType): ImageVector {
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.WALK -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.HIKE -> Icons.AutoMirrored.Filled.DirectionsWalk
     }
 }
 

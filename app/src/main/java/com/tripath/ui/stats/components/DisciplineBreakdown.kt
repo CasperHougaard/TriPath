@@ -29,7 +29,8 @@ fun DisciplineBreakdown(
     totalWorkouts: Int,
     modifier: Modifier = Modifier
 ) {
-    val sortedStats = stats.sortedByDescending { it.count }
+    val totalDuration = stats.sumOf { it.totalDuration }
+    val sortedStats = stats.sortedByDescending { it.totalDuration }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -39,7 +40,7 @@ fun DisciplineBreakdown(
             DisciplineRow(
                 type = stat.type,
                 count = stat.count,
-                percentage = if (totalWorkouts > 0) stat.count.toFloat() / totalWorkouts else 0f,
+                percentage = if (totalDuration > 0) stat.totalDuration.toFloat() / totalDuration else 0f,
                 duration = stat.totalDuration
             )
         }

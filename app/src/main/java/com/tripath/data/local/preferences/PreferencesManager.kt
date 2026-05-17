@@ -14,6 +14,7 @@ import com.tripath.data.model.AnchorType
 import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.running.RunningGoal
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -52,6 +53,7 @@ class PreferencesManager @Inject constructor(
         private val DEFAULT_STRENGTH_LIGHT_TSS_KEY = intPreferencesKey("default_strength_light_tss")
         private val GOAL_DATE_KEY = longPreferencesKey("goal_date") // Stored as epoch day
         private val WEEKLY_HOURS_GOAL_KEY = floatPreferencesKey("weekly_hours_goal")
+        private val ANNUAL_VOLUME_GOAL_HOURS_KEY = floatPreferencesKey("annual_volume_goal_hours")
         private val LTHR_KEY = intPreferencesKey("lthr")
         private val CSS_SECONDS_PER_100M_KEY = intPreferencesKey("css_seconds_per_100m")
         private val THRESHOLD_RUN_PACE_KEY = intPreferencesKey("threshold_run_pace")
@@ -60,6 +62,7 @@ class PreferencesManager @Inject constructor(
         private val STRENGTH_DAYS_KEY = intPreferencesKey("strength_days")
         private val TRAINING_BALANCE_KEY = stringPreferencesKey("training_balance")
         private val WEEKLY_SCHEDULE_KEY = stringPreferencesKey("weekly_schedule")
+        private val ACTIVE_RUNNING_GOAL_KEY = stringPreferencesKey("active_running_goal")
         
         // Coach Planning Settings keys
         private val IS_SMART_PLANNING_ENABLED_KEY = booleanPreferencesKey("is_smart_planning_enabled")
@@ -164,6 +167,7 @@ class PreferencesManager @Inject constructor(
         val defaultStrengthLightTSS = preferences[DEFAULT_STRENGTH_LIGHT_TSS_KEY]
         val goalDateEpochDay = preferences[GOAL_DATE_KEY]
         val weeklyHoursGoal = preferences[WEEKLY_HOURS_GOAL_KEY]
+        val annualVolumeGoalHours = preferences[ANNUAL_VOLUME_GOAL_HOURS_KEY]
         val lthr = preferences[LTHR_KEY]
         val cssSecondsper100m = preferences[CSS_SECONDS_PER_100M_KEY]
         val thresholdRunPace = preferences[THRESHOLD_RUN_PACE_KEY]
@@ -176,7 +180,7 @@ class PreferencesManager @Inject constructor(
         // If no fields are set, return null
         if (ftpBike == null && maxHeartRate == null && defaultSwimTSS == null &&
             defaultStrengthHeavyTSS == null && defaultStrengthLightTSS == null &&
-            goalDateEpochDay == null && weeklyHoursGoal == null && lthr == null &&
+            goalDateEpochDay == null && weeklyHoursGoal == null && annualVolumeGoalHours == null && lthr == null &&
             cssSecondsper100m == null && thresholdRunPace == null && weeklyAvailabilityJson == null &&
             longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null &&
             weeklyScheduleJson == null
@@ -230,6 +234,7 @@ class PreferencesManager @Inject constructor(
             defaultStrengthLightTSS = defaultStrengthLightTSS ?: 30,
             goalDate = goalDateEpochDay?.let { LocalDate.ofEpochDay(it) },
             weeklyHoursGoal = weeklyHoursGoal,
+            annualVolumeGoalHours = annualVolumeGoalHours,
             lthr = lthr,
             cssSecondsper100m = cssSecondsper100m,
             thresholdRunPace = thresholdRunPace,
@@ -261,6 +266,8 @@ class PreferencesManager @Inject constructor(
                 ?: preferences.remove(GOAL_DATE_KEY)
             profile.weeklyHoursGoal?.let { preferences[WEEKLY_HOURS_GOAL_KEY] = it } 
                 ?: preferences.remove(WEEKLY_HOURS_GOAL_KEY)
+            profile.annualVolumeGoalHours?.let { preferences[ANNUAL_VOLUME_GOAL_HOURS_KEY] = it }
+                ?: preferences.remove(ANNUAL_VOLUME_GOAL_HOURS_KEY)
             profile.lthr?.let { preferences[LTHR_KEY] = it } 
                 ?: preferences.remove(LTHR_KEY)
             profile.cssSecondsper100m?.let { preferences[CSS_SECONDS_PER_100M_KEY] = it } 
@@ -306,6 +313,7 @@ class PreferencesManager @Inject constructor(
             preferences.remove(DEFAULT_STRENGTH_LIGHT_TSS_KEY)
             preferences.remove(GOAL_DATE_KEY)
             preferences.remove(WEEKLY_HOURS_GOAL_KEY)
+            preferences.remove(ANNUAL_VOLUME_GOAL_HOURS_KEY)
             preferences.remove(LTHR_KEY)
             preferences.remove(CSS_SECONDS_PER_100M_KEY)
             preferences.remove(THRESHOLD_RUN_PACE_KEY)
@@ -314,6 +322,42 @@ class PreferencesManager @Inject constructor(
             preferences.remove(STRENGTH_DAYS_KEY)
             preferences.remove(TRAINING_BALANCE_KEY)
             preferences.remove(WEEKLY_SCHEDULE_KEY)
+        }
+    }
+
+    // ==================== Running Goal Operations ====================
+
+    /**
+     * Flow that emits the persisted active running goal.
+     * Returns null when no running goal has been saved.
+     */
+    val activeRunningGoalFlow: Flow<RunningGoal?> = dataStore.data.map { preferences ->
+        RunningGoalPreferencesCodec.decode(preferences[ACTIVE_RUNNING_GOAL_KEY])
+    }
+
+    /**
+     * Get the persisted active running goal as a one-shot value.
+     */
+    suspend fun getActiveRunningGoal(): RunningGoal? {
+        val preferences = dataStore.data.first()
+        return RunningGoalPreferencesCodec.decode(preferences[ACTIVE_RUNNING_GOAL_KEY])
+    }
+
+    /**
+     * Save or replace the active running goal.
+     */
+    suspend fun saveActiveRunningGoal(goal: RunningGoal) {
+        dataStore.edit { preferences ->
+            preferences[ACTIVE_RUNNING_GOAL_KEY] = RunningGoalPreferencesCodec.encode(goal)
+        }
+    }
+
+    /**
+     * Clear the active running goal.
+     */
+    suspend fun clearActiveRunningGoal() {
+        dataStore.edit { preferences ->
+            preferences.remove(ACTIVE_RUNNING_GOAL_KEY)
         }
     }
 

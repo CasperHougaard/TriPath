@@ -9,6 +9,8 @@ enum class WorkoutType {
     BIKE,
     SWIM,
     STRENGTH,
-    OTHER
+    OTHER,
+    WALK,
+    HIKE
 }
 

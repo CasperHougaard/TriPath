@@ -114,6 +114,8 @@ object IntensityCalculator {
                 }
             }
             WorkoutType.OTHER -> "General Activity"
+            WorkoutType.WALK -> "Walk at a brisk pace"
+            WorkoutType.HIKE -> "Hike at a steady pace"
         }
     }
 

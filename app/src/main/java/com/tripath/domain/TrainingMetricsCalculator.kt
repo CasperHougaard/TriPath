@@ -87,6 +87,20 @@ object TrainingMetricsCalculator {
                     (durationHours * 20).toInt() // 20 TSS/hour for walking/hiking
                 }
             }
+            WorkoutType.WALK -> {
+                if (avgHr != null) {
+                    calculateHrTSS(durationMin, avgHr, userProfile.maxHeartRate ?: DEFAULT_MAX_HR)
+                } else {
+                    (durationHours * 30).toInt() // Moderate intensity default for walking
+                }
+            }
+            WorkoutType.HIKE -> {
+                if (avgHr != null) {
+                    calculateHrTSS(durationMin, avgHr, userProfile.maxHeartRate ?: DEFAULT_MAX_HR)
+                } else {
+                    (durationHours * 40).toInt() // Higher intensity default for hiking
+                }
+            }
         }
     }
 

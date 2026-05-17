@@ -24,6 +24,7 @@ import com.tripath.domain.coach.CoachPlanGenerator
 import com.tripath.domain.coach.CoachWarning
 import com.tripath.domain.coach.ReadinessStatus
 import com.tripath.domain.coach.TrainingRulesEngine
+import com.tripath.domain.running.RunningGoal
 import com.tripath.ui.model.FormStatus
 import com.tripath.ui.model.PerformanceDataPoint
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -448,7 +449,7 @@ class CoachViewModel @Inject constructor(
         }
     }
 
-    fun generateSeasonPlan(months: Int = 3) {
+    fun generateSeasonPlan(months: Int = 3, runningGoal: RunningGoal? = null) {
         viewModelScope.launch {
             _isGenerating.value = true
             _generationError.value = null
@@ -456,9 +457,11 @@ class CoachViewModel @Inject constructor(
             
             try {
                 withContext(Dispatchers.IO) {
+                    val effectiveRunningGoal = runningGoal ?: preferencesManager.getActiveRunningGoal()
+
                     // Get current user profile
                     val profile = repository.getUserProfileOnce()
-                    if (profile == null) {
+                    if (profile == null && effectiveRunningGoal == null) {
                         _generationError.value = "User profile not found. Please complete your profile."
                         return@withContext
                     }
@@ -482,17 +485,17 @@ class CoachViewModel @Inject constructor(
                         !it.date.isAfter(today.minusDays(1))
                     }
                     
-                    // Delete existing plans for the generation period to avoid over-population
-                    // Start deletion from the plan start date (next Monday)
-                    val endDate = planStartDate.plusMonths(months.toLong())
-                    repository.deleteTrainingPlansByDateRange(planStartDate, endDate)
+                    // Delete ALL existing training plans before generating new ones
+                    // This ensures clean slate: removes plans before, during, and after the new plan scope
+                    repository.deleteAllTrainingPlans()
                     
                     // Generate the plan starting from next Monday
                     val generationResult = coachPlanGenerator.generateSeason(
                         startDate = planStartDate,
                         currentCtl = currentCtl,
                         months = months,
-                        recentRealLogs = recentLogs
+                        recentRealLogs = recentLogs,
+                        runningGoal = effectiveRunningGoal
                     )
                     
                     // Handle result

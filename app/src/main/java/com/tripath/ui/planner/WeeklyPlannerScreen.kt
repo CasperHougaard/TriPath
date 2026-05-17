@@ -40,6 +40,7 @@ import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.model.WorkoutType
 import com.tripath.ui.components.SectionHeader
 import com.tripath.ui.navigation.Screen
+import com.tripath.ui.theme.plannedContentTint
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import com.tripath.ui.theme.toColor
@@ -60,12 +61,16 @@ fun WeeklyPlannerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var expandedWeeks by remember { mutableStateOf(setOf<Int>()) }
 
+    // Inject CoachViewModel for plan generation
+    val coachViewModel: com.tripath.ui.coach.CoachViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+
     Scaffold(modifier = modifier) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            // ...existing code for header, matrix, etc...
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -76,14 +81,12 @@ fun WeeklyPlannerScreen(
                     title = "Planner",
                     subtitle = if (uiState.isMonthView) "Month overview" else "4-week overview"
                 )
-
                 MatrixNavigationHeader(
                     currentMonth = uiState.currentMonth,
                     onPrevMonth = { viewModel.previousMonth() },
                     onNextMonth = { viewModel.nextMonth() },
                     onGoToCurrent = { viewModel.goToCurrent() }
                 )
-
                 // Toggle for including imported activities
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -95,7 +98,6 @@ fun WeeklyPlannerScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
-                    
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
                         verticalAlignment = Alignment.CenterVertically
@@ -114,7 +116,6 @@ fun WeeklyPlannerScreen(
                                 style = MaterialTheme.typography.labelSmall
                             )
                         }
-                        
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                             verticalAlignment = Alignment.CenterVertically,
@@ -142,16 +143,14 @@ fun WeeklyPlannerScreen(
                     .padding(horizontal = Spacing.md),
                 verticalArrangement = Arrangement.spacedBy(Spacing.xs)
             ) {
-                // Day Labels
+                // ...existing code for day labels, weekly rows, etc...
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(end = 80.dp), // Match summary panel width
+                        .padding(end = 80.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    // Week label placeholder
                     Spacer(modifier = Modifier.width(24.dp))
-                    
                     val days = listOf("M", "T", "W", "T", "F", "S", "S")
                     days.forEach { day ->
                         Text(
@@ -163,32 +162,21 @@ fun WeeklyPlannerScreen(
                         )
                     }
                 }
-
                 uiState.weeklyRows.forEachIndexed { index, weekRow ->
                     val isExpanded = expandedWeeks.contains(index)
-
                     WeeklyRow(
                         weekRow = weekRow,
                         isExpanded = isExpanded,
                         includeImported = uiState.includeImportedActivities,
-                        onDayClick = { date -> 
-                            navController.navigate(Screen.DayDetail.createRoute(date))
-                        },
-                        onWorkoutClick = { workoutId, isPlanned ->
-                            navController.navigate(Screen.WorkoutDetail.createRoute(workoutId, isPlanned))
-                        },
+                        onDayClick = { date -> navController.navigate(Screen.DayDetail.createRoute(date)) },
+                        onWorkoutClick = { workoutId, isPlanned -> navController.navigate(Screen.WorkoutDetail.createRoute(workoutId, isPlanned)) },
                         onToggleExpand = {
-                            expandedWeeks = if (isExpanded) {
-                                expandedWeeks - index
-                            } else {
-                                expandedWeeks + index
-                            }
+                            expandedWeeks = if (isExpanded) expandedWeeks - index else expandedWeeks + index
                         },
                         onCopyWeek = { viewModel.copyWeek(weekRow.weekStart) },
                         weekNumber = weekRow.weekNumber
                     )
                 }
-                
                 if (uiState.disciplineDistribution.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(Spacing.md))
                     DisciplineDistributionBar(
@@ -198,8 +186,32 @@ fun WeeklyPlannerScreen(
                             .padding(horizontal = Spacing.xs)
                     )
                 }
-
                 Spacer(modifier = Modifier.weight(1f))
+
+                // BOTTOM BUTTONS
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = Spacing.lg),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Button(
+                        onClick = { coachViewModel.generateSeasonPlan(months = 3) },
+                        enabled = true
+                    ) {
+                        Text("Generate Plan")
+                    }
+                    Button(
+                        onClick = { coachViewModel.generateSeasonPlan(months = 3) },
+                        enabled = uiState.weeklyRows.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (uiState.weeklyRows.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (uiState.weeklyRows.isNotEmpty()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text("Regenerate")
+                    }
+                }
             }
         }
     }
@@ -319,12 +331,15 @@ fun DayCell(
     }
     val totalTSS = totalPlannedTSS + totalImportedTSS
     
+
+    // Use grey-ish for planned activities, sport color for completed
+    val plannedGrey = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
     val heatmapColor = when {
-        totalTSS == 0 -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-        totalTSS <= 20 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-        totalTSS <= 60 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-        totalTSS <= 100 -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-        else -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+        totalTSS == 0 -> plannedGrey.copy(alpha = 0.3f)
+        totalTSS <= 20 -> plannedGrey.copy(alpha = 0.4f)
+        totalTSS <= 60 -> plannedGrey.copy(alpha = 0.6f)
+        totalTSS <= 100 -> plannedGrey.copy(alpha = 0.8f)
+        else -> plannedGrey
     }
 
     val backgroundColor = when {
@@ -392,12 +407,12 @@ fun DayCell(
                     val hasActivities = day.workouts.isNotEmpty() || importedLogs.isNotEmpty()
                     
                     if (hasActivities) {
-                        // Show planned workouts
+                        // Show planned workouts in grey
                         day.workouts.forEach { workout ->
                             Icon(
                                 imageVector = workout.type.toIcon(),
                                 contentDescription = null,
-                                tint = workout.type.toColor(),
+                                tint = workout.plannedContentTint(MaterialTheme.colorScheme.onSurface),
                                 modifier = Modifier
                                     .size(if (isExpanded) 16.dp else 14.dp)
                             )
@@ -405,7 +420,6 @@ fun DayCell(
                                 Spacer(modifier = Modifier.height(2.dp))
                             }
                         }
-                        
                         // Show imported logs (with slightly different styling to distinguish)
                         if (includeImported) {
                             importedLogs.forEach { log ->
@@ -527,6 +541,8 @@ private fun WorkoutType.toIcon(): ImageVector {
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.WALK -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.HIKE -> Icons.AutoMirrored.Filled.DirectionsWalk
     }
 }
 

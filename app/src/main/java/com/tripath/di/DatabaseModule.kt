@@ -14,6 +14,8 @@ import com.tripath.data.local.database.dao.WorkoutLogDao
 import com.tripath.data.local.database.migrations.MIGRATION_1_2
 import com.tripath.data.local.database.migrations.MIGRATION_10_11
 import com.tripath.data.local.database.migrations.MIGRATION_11_12
+import com.tripath.data.local.database.migrations.MIGRATION_12_13
+import com.tripath.data.local.database.migrations.MIGRATION_13_14
 import com.tripath.data.local.database.migrations.MIGRATION_2_3
 import com.tripath.data.local.database.migrations.MIGRATION_3_4
 import com.tripath.data.local.database.migrations.MIGRATION_4_5
@@ -60,7 +62,9 @@ object DatabaseModule {
                 MIGRATION_8_9,
                 MIGRATION_9_10,
                 MIGRATION_10_11,
-                MIGRATION_11_12
+                MIGRATION_11_12,
+                MIGRATION_12_13,
+                MIGRATION_13_14
             )
             .fallbackToDestructiveMigration() // Development fallback - allows DB to rebuild if migration fails
             .build()

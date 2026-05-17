@@ -33,6 +33,7 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.model.WorkoutType
 import com.tripath.ui.navigation.Screen
 import com.tripath.ui.planner.AddWorkoutBottomSheet
+import com.tripath.ui.theme.plannedContentTint
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.toColor
 import java.time.LocalDate
@@ -50,6 +51,7 @@ fun DayDetailScreen(
     var showAddEditSheet by remember { mutableStateOf(false) }
     var showTemplateDialog by remember { mutableStateOf(false) }
     var editingActivity by remember { mutableStateOf<TrainingPlan?>(null) }
+    var customMoveActivity by remember { mutableStateOf<TrainingPlan?>(null) }
     var noteText by remember { mutableStateOf("") }
     
     // Load data when screen opens
@@ -183,8 +185,14 @@ fun DayDetailScreen(
                     }
                 } else {
                     items(uiState.plannedActivities) { activity ->
+                        val missedRunAssistantState = buildMissedRunAssistantState(
+                            activity = activity,
+                            completedWorkouts = uiState.completedWorkouts
+                        )
+
                         PlannedActivityCard(
                             activity = activity,
+                            missedRunAssistantState = missedRunAssistantState,
                             onClick = {
                                 navController.navigate(Screen.WorkoutDetail.createRoute(activity.id, true))
                             },
@@ -192,7 +200,19 @@ fun DayDetailScreen(
                                 editingActivity = activity
                                 showAddEditSheet = true
                             },
-                            onDelete = { viewModel.deleteActivity(activity) }
+                            onDelete = { viewModel.deleteActivity(activity) },
+                            onMoveToTomorrow = {
+                                viewModel.moveActivityToDate(
+                                    activity = activity,
+                                    newDate = missedRunTomorrowDate()
+                                )
+                            },
+                            onMoveToCustomDate = {
+                                customMoveActivity = activity
+                            },
+                            onDropMissedRun = {
+                                viewModel.dropMissedRun(activity)
+                            }
                         )
                     }
                 }
@@ -254,6 +274,44 @@ fun DayDetailScreen(
                 viewModel.deleteTemplate(template)
             }
         )
+    }
+
+    customMoveActivity?.let { activity ->
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = missedRunTomorrowDate()
+                .atStartOfDay(java.time.ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        )
+
+        DatePickerDialog(
+            onDismissRequest = { customMoveActivity = null },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val selectedDate = datePickerState.selectedDateMillis?.let { millis ->
+                            java.time.Instant.ofEpochMilli(millis)
+                                .atZone(java.time.ZoneId.systemDefault())
+                                .toLocalDate()
+                        }
+
+                        if (selectedDate != null && selectedDate != activity.date) {
+                            viewModel.moveActivityToDate(activity, selectedDate)
+                        }
+                        customMoveActivity = null
+                    }
+                ) {
+                    Text("Move")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { customMoveActivity = null }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
     }
 }
 
@@ -401,87 +459,141 @@ fun TemplateManagementDialog(
 @Composable
 fun PlannedActivityCard(
     activity: TrainingPlan,
+    missedRunAssistantState: MissedRunAssistantState,
     onClick: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onMoveToTomorrow: () -> Unit,
+    onMoveToCustomDate: () -> Unit,
+    onDropMissedRun: () -> Unit
 ) {
+    val plannedGrey = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+    val plannedTint = activity.plannedContentTint(MaterialTheme.colorScheme.onSurface)
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
         shape = RoundedCornerShape(Spacing.md),
         colors = CardDefaults.cardColors(
-            containerColor = activity.type.toColor().copy(alpha = 0.15f)
+            containerColor = plannedGrey
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .padding(Spacing.md)
                 .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(activity.type.toColor()),
-                contentAlignment = Alignment.Center
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.md)
             ) {
-                Icon(
-                    imageVector = activity.type.toIcon(),
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = activity.subType ?: activity.type.name.lowercase()
-                        .replaceFirstChar { it.uppercase() },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(plannedGrey),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "${activity.durationMinutes} min",
-                        style = MaterialTheme.typography.bodySmall
+                    Icon(
+                        imageVector = activity.type.toIcon(),
+                        contentDescription = null,
+                        tint = plannedTint,
+                        modifier = Modifier.size(28.dp)
                     )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "•",
-                        style = MaterialTheme.typography.bodySmall
+                        text = activity.subType ?: activity.type.name.lowercase()
+                            .replaceFirstChar { it.uppercase() },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "${activity.plannedTSS} TSS",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                        color = activity.type.toColor()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
+                        Text(
+                            text = "${activity.durationMinutes} min",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = "•",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = "${activity.plannedTSS} TSS",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = plannedTint
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = {
+                        onEdit()
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    )
+                }
+
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
                     )
                 }
             }
 
-            IconButton(
-                onClick = {
-                    onEdit()
+            if (missedRunAssistantState.isEligible) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Text(
+                        text = "Missed run assistant",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "This planned run is in the past and has no same-day completed run."
+                            + " Reschedule it or drop it from the plan.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+                    ) {
+                        FilledTonalButton(
+                            onClick = onMoveToTomorrow,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Tomorrow")
+                        }
+                        OutlinedButton(
+                            onClick = onMoveToCustomDate,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Custom Date")
+                        }
+                    }
+                    TextButton(
+                        onClick = onDropMissedRun,
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Drop Run")
+                    }
                 }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "Edit",
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                )
-            }
-            
-            IconButton(onClick = onDelete) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Delete",
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-                )
             }
         }
     }
@@ -573,6 +685,8 @@ private fun WorkoutType.toIcon(): ImageVector {
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.WALK -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.HIKE -> Icons.AutoMirrored.Filled.DirectionsWalk
     }
 }
 

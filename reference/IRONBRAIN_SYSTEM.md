@@ -444,6 +444,6 @@ The architecture is well-structured for incremental improvements. The validation
 ---
 
 **Last Updated:** January 2025  
-**Database Version:** 11  
+**Database Version:** 12  
 **Min SDK:** 33 | **Target SDK:** 35
 

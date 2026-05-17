@@ -64,6 +64,11 @@ import com.tripath.data.model.WorkoutType
 import com.tripath.data.model.RoutePoint
 import com.tripath.domain.IntensityCalculator
 import com.tripath.domain.IntensityTagColor
+import com.tripath.domain.running.RunStepDurationType
+import com.tripath.domain.running.RunWorkoutStep
+import com.tripath.domain.running.StructuredRunWorkout
+import com.tripath.domain.running.StructuredRunWorkoutBuilder
+import com.tripath.domain.running.runningSessionTypeFromPlanSubType
 import com.tripath.ui.components.IntensityTag
 import com.tripath.ui.components.RouteViewer
 import com.tripath.ui.components.SmartAdviceCard
@@ -83,6 +88,7 @@ fun WorkoutDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showMoveDialog by remember { mutableStateOf(false) }
 
     // Load workout data
     LaunchedEffect(workoutId, isPlanned) {
@@ -101,8 +107,8 @@ fun WorkoutDetailScreen(
                 actions = {
                     // Edit action only for planned workouts
                     if (isPlanned) {
-                        IconButton(onClick = { /* TODO: Navigate to edit screen */ }) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit")
+                        IconButton(onClick = { showMoveDialog = true }) {
+                            Icon(Icons.Default.Edit, contentDescription = "Reschedule")
                         }
                     }
                     // Delete action for both
@@ -145,6 +151,7 @@ fun WorkoutDetailScreen(
                             linkedPlan = uiState.linkedPlan,
                             userProfile = uiState.userProfile,
                             route = uiState.route,
+                            rawWorkoutData = uiState.rawWorkoutData,
                             viewModel = viewModel
                         )
                     }
@@ -178,6 +185,49 @@ fun WorkoutDetailScreen(
             }
         )
     }
+
+    // Move/Reschedule dialog (simple date picker dialog)
+    if (showMoveDialog && isPlanned) {
+        uiState.trainingPlan?.let { trainingPlan ->
+            val datePickerState = androidx.compose.material3.rememberDatePickerState(
+                initialSelectedDateMillis = trainingPlan.date
+                    .atStartOfDay(java.time.ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli()
+            )
+
+            androidx.compose.material3.DatePickerDialog(
+                onDismissRequest = { showMoveDialog = false },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val selectedDate = datePickerState.selectedDateMillis?.let { millis ->
+                                java.time.Instant.ofEpochMilli(millis)
+                                    .atZone(java.time.ZoneId.systemDefault())
+                                    .toLocalDate()
+                            }
+
+                            if (selectedDate != null && selectedDate != trainingPlan.date) {
+                                viewModel.moveTrainingPlan(
+                                    planId = trainingPlan.id,
+                                    newDate = selectedDate
+                                ) {
+                                    showMoveDialog = false
+                                }
+                            } else {
+                                showMoveDialog = false
+                            }
+                        }
+                    ) { Text("Move") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showMoveDialog = false }) { Text("Cancel") }
+                }
+            ) {
+                androidx.compose.material3.DatePicker(state = datePickerState)
+            }
+        }
+    }
 }
 
 @Composable
@@ -193,6 +243,20 @@ private fun PlannedWorkoutContent(
         durationMinutes = plan.durationMinutes,
         userProfile = uiState.userProfile
     )
+    val structuredRunWorkout = remember(
+        plan.type,
+        plan.subType,
+        plan.plannedDistanceMeters,
+        uiState.userProfile?.thresholdRunPace,
+        uiState.structuredRunWeekIndex,
+        uiState.structuredRunTotalWeeks
+    ) {
+        plan.toStructuredRunWorkout(
+            baselinePaceSecPerKm = uiState.userProfile?.thresholdRunPace,
+            weekIndex = uiState.structuredRunWeekIndex ?: 1,
+            totalWeeks = uiState.structuredRunTotalWeeks ?: 1
+        )
+    }
 
     Column(
         modifier = modifier
@@ -215,6 +279,10 @@ private fun PlannedWorkoutContent(
 
         // Metrics Grid
         PlannedMetricsGrid(plan = plan)
+
+        structuredRunWorkout?.let { workout ->
+            StructuredRunWorkoutSection(workout = workout)
+        }
 
         // Strength Details (if applicable)
         if (plan.type == WorkoutType.STRENGTH) {
@@ -239,6 +307,7 @@ private fun CompletedWorkoutContent(
     linkedPlan: TrainingPlan?,
     userProfile: UserProfile?,
     route: List<RoutePoint>?,
+    rawWorkoutData: com.tripath.data.local.database.entities.RawWorkoutData?,
     viewModel: WorkoutDetailViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -470,6 +539,13 @@ private fun PlannedMetricsGrid(
                 label = "Duration",
                 value = "${plan.durationMinutes} min"
             )
+
+            plan.plannedDistanceMeters?.let { distanceMeters ->
+                MetricRow(
+                    label = "Planned Distance",
+                    value = formatDistance(distanceMeters.toDouble(), plan.type)
+                )
+            }
             
             MetricRow(
                 label = "Planned TSS",
@@ -815,6 +891,46 @@ private fun NotesSection(
 }
 
 @Composable
+private fun StructuredRunWorkoutSection(
+    workout: StructuredRunWorkout,
+    modifier: Modifier = Modifier
+) {
+    val compactLines = remember(workout.steps) {
+        compactRunStepLines(workout.steps)
+    }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Text(
+                text = "Run Details",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                compactLines.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MetricRow(
     label: String,
     value: String,
@@ -836,6 +952,110 @@ private fun MetricRow(
         )
     }
 }
+
+private fun TrainingPlan.toStructuredRunWorkout(
+    baselinePaceSecPerKm: Int?,
+    weekIndex: Int,
+    totalWeeks: Int
+): StructuredRunWorkout? {
+    if (type != WorkoutType.RUN) return null
+
+    val sessionType = runningSessionTypeFromPlanSubType(subType) ?: return null
+    return StructuredRunWorkoutBuilder.build(
+        sessionType = sessionType,
+        plannedDistanceMeters = plannedDistanceMeters,
+        baselinePaceSecPerKm = baselinePaceSecPerKm,
+        targetDistanceMeters = plannedDistanceMeters,
+        weekIndex = weekIndex,
+        totalWeeks = totalWeeks
+    )
+}
+
+private fun formatRunStep(step: RunWorkoutStep): String {
+    val durationText = when (step.durationType) {
+        RunStepDurationType.TIME -> "${step.durationValue} min"
+        RunStepDurationType.DISTANCE -> formatDistance(step.durationValue.toDouble(), WorkoutType.RUN)
+    }
+    val description = sanitizedRunStepDescription(step)
+    return "$durationText $description"
+}
+
+private fun compactRunStepLines(steps: List<RunWorkoutStep>): List<String> {
+    val lines = mutableListOf<String>()
+    var index = 0
+
+    while (index < steps.size) {
+        val collapsedBlock = collapseRepeatedRunBlock(steps, index)
+        if (collapsedBlock != null) {
+            lines += collapsedBlock.line
+            index = collapsedBlock.nextIndex
+        } else {
+            lines += formatRunStep(steps[index])
+            index += 1
+        }
+    }
+
+    return lines
+}
+
+private fun collapseRepeatedRunBlock(
+    steps: List<RunWorkoutStep>,
+    startIndex: Int
+): CollapsedRunBlock? {
+    val workStep = steps.getOrNull(startIndex) ?: return null
+    if (workStep.type != com.tripath.domain.running.RunWorkoutStepType.INTERVAL &&
+        workStep.type != com.tripath.domain.running.RunWorkoutStepType.THRESHOLD
+    ) {
+        return null
+    }
+
+    val recoveryStep = steps.getOrNull(startIndex + 1)
+    if (recoveryStep?.type != com.tripath.domain.running.RunWorkoutStepType.RECOVERY_JOG) {
+        return null
+    }
+
+    var index = startIndex
+    var repCount = 0
+    while (index < steps.size) {
+        val currentWork = steps.getOrNull(index) ?: break
+        if (!matchesRepeatedStep(currentWork, workStep)) break
+        repCount += 1
+        index += 1
+
+        val currentRecovery = steps.getOrNull(index)
+        if (currentRecovery != null && matchesRepeatedStep(currentRecovery, recoveryStep)) {
+            index += 1
+        }
+    }
+
+    if (repCount < 2) return null
+
+    return CollapsedRunBlock(
+        line = "$repCount x ${formatRunStep(workStep)} with ${formatRunStep(recoveryStep)} between reps",
+        nextIndex = index
+    )
+}
+
+private fun matchesRepeatedStep(step: RunWorkoutStep, reference: RunWorkoutStep): Boolean {
+    return step.type == reference.type &&
+        step.durationType == reference.durationType &&
+        step.durationValue == reference.durationValue &&
+        step.targetType == reference.targetType &&
+        step.targetLow == reference.targetLow &&
+        step.targetHigh == reference.targetHigh
+}
+
+private fun sanitizedRunStepDescription(step: RunWorkoutStep): String {
+    val withoutRepNumber = step.description.replace(Regex("\\s+\\d+(?=\\s*(\\(|$))"), "")
+    return withoutRepNumber.replaceFirstChar {
+        if (it.isUpperCase()) it.lowercase() else it.toString()
+    }
+}
+
+private data class CollapsedRunBlock(
+    val line: String,
+    val nextIndex: Int
+)
 
 @Composable
 private fun ErrorState(
@@ -870,6 +1090,8 @@ private fun getWorkoutIcon(type: WorkoutType): ImageVector {
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.WALK -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.HIKE -> Icons.AutoMirrored.Filled.DirectionsWalk
     }
 }
 

@@ -49,6 +49,12 @@ data class RawWorkoutData(
      * Format: [{"lat": 55.123, "lon": 12.456, "alt": 10.5, "t": 123456789}, ...]
      */
     val routeJson: String? = null,
+
+    /**
+     * Legacy CNS import payload retained for schema compatibility with existing databases.
+     */
+    val cnsJson: String? = null,
+    
     
     /** Timestamp when this record was imported into TriPath database */
     val importedAt: Long = System.currentTimeMillis()

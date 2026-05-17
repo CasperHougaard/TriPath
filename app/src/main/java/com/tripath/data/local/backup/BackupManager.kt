@@ -214,6 +214,7 @@ data class TrainingPlanDto(
     val subType: String?,
     val durationMinutes: Int,
     val plannedTSS: Int,
+    val plannedDistanceMeters: Int? = null,
     val strengthFocus: String?,
     val intensity: String?
 )
@@ -254,6 +255,7 @@ data class RawWorkoutDataDto(
     val rawDistanceMeters: Double?,
     val rawSteps: Int?,
     val routeJson: String? = null,
+    val cnsJson: String? = null,
     val importedAt: Long
 )
 
@@ -334,6 +336,7 @@ data class UserProfileDto(
     @Serializable(with = LocalDateSerializer::class)
     val goalDate: LocalDate?,
     val weeklyHoursGoal: Float?,
+    val annualVolumeGoalHours: Float? = null,
     val lthr: Int?,
     val cssSecondsper100m: Int?,
     val thresholdRunPace: Int?
@@ -348,6 +351,7 @@ fun TrainingPlan.toDto() = TrainingPlanDto(
     subType = subType,
     durationMinutes = durationMinutes,
     plannedTSS = plannedTSS,
+    plannedDistanceMeters = plannedDistanceMeters,
     strengthFocus = strengthFocus?.name,
     intensity = intensity?.name
 )
@@ -359,6 +363,7 @@ fun TrainingPlanDto.toEntity() = TrainingPlan(
     subType = subType,
     durationMinutes = durationMinutes,
     plannedTSS = plannedTSS,
+    plannedDistanceMeters = plannedDistanceMeters,
     strengthFocus = strengthFocus?.let { StrengthFocus.valueOf(it) },
     intensity = intensity?.let { Intensity.valueOf(it) }
 )
@@ -406,6 +411,7 @@ private fun RawWorkoutData.toDto() = RawWorkoutDataDto(
     rawDistanceMeters = rawDistanceMeters,
     rawSteps = rawSteps,
     routeJson = routeJson,
+    cnsJson = cnsJson,
     importedAt = importedAt
 )
 
@@ -420,6 +426,7 @@ private fun RawWorkoutDataDto.toEntity() = RawWorkoutData(
     rawDistanceMeters = rawDistanceMeters,
     rawSteps = rawSteps,
     routeJson = routeJson,
+    cnsJson = cnsJson,
     importedAt = importedAt
 )
 
@@ -477,6 +484,7 @@ private fun UserProfile.toDto() = UserProfileDto(
     defaultStrengthLightTSS = defaultStrengthLightTSS,
     goalDate = goalDate,
     weeklyHoursGoal = weeklyHoursGoal,
+    annualVolumeGoalHours = annualVolumeGoalHours,
     lthr = lthr,
     cssSecondsper100m = cssSecondsper100m,
     thresholdRunPace = thresholdRunPace
@@ -490,6 +498,7 @@ private fun UserProfileDto.toEntity() = UserProfile(
     defaultStrengthLightTSS = defaultStrengthLightTSS,
     goalDate = goalDate,
     weeklyHoursGoal = weeklyHoursGoal,
+    annualVolumeGoalHours = annualVolumeGoalHours,
     lthr = lthr,
     cssSecondsper100m = cssSecondsper100m,
     thresholdRunPace = thresholdRunPace

@@ -13,6 +13,11 @@ import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
 import com.tripath.domain.CoachEngine
 import com.tripath.domain.TrainingPhase
+import com.tripath.domain.running.RunGoalPlanGenerator
+import com.tripath.domain.running.RunningGoal
+import com.tripath.domain.running.RunGoalTrainingPlanMapper
+import com.tripath.domain.running.RunningProgressionRules
+import com.tripath.domain.running.RunningProgressionWarning
 import kotlinx.coroutines.flow.first
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -171,7 +176,8 @@ class CoachPlanGenerator @Inject constructor(
         startDate: LocalDate,
         currentCtl: Double,
         months: Int = 3,
-        recentRealLogs: List<WorkoutLog> = emptyList()
+        recentRealLogs: List<WorkoutLog> = emptyList(),
+        runningGoal: RunningGoal? = null
     ): GenerationResult {
         val smartEnabled = preferencesManager.smartPlanningEnabledFlow.first()
         if (!smartEnabled) {
@@ -180,6 +186,51 @@ class CoachPlanGenerator @Inject constructor(
                 reason = "Smart Planning is disabled",
                 details = "Please enable Smart Planning in Coach Settings to generate training plans."
             )
+        }
+
+        val effectiveRunningGoal = runningGoal ?: preferencesManager.getActiveRunningGoal()
+
+        effectiveRunningGoal?.let { runningGoal ->
+            val progression = RunningProgressionRules.generateWeeklyTargets(
+                goal = runningGoal,
+                planStartDate = startDate,
+                openEndedWeeks = (months * 4).coerceAtLeast(1)
+            )
+
+            when {
+                progression.warnings.contains(RunningProgressionWarning.TARGET_DATE_TOO_SOON) -> {
+                    return GenerationResult.Failure(
+                        reason = "TARGET_DATE_TOO_SOON",
+                        details = "Complete-distance running goals need a target date at least 2 weeks after the generated plan start."
+                    )
+                }
+                progression.warnings.contains(RunningProgressionWarning.TARGET_DATE_TOO_FAR) -> {
+                    return GenerationResult.Failure(
+                        reason = "TARGET_DATE_TOO_FAR",
+                        details = "Complete-distance running goals can be planned up to 52 weeks ahead. Choose a closer target date."
+                    )
+                }
+                progression.warnings.contains(RunningProgressionWarning.LONG_GOAL_HORIZON) -> {
+                    Log.w(TAG, "⚠️ LONG_GOAL_HORIZON: Running goal extends beyond the normal 24-week planning window.")
+                }
+            }
+
+            val runningGoalPlans = RunGoalTrainingPlanMapper.mapToTrainingPlans(
+                goal = runningGoal,
+                progressionResult = progression,
+                preferredRunningDays = runningGoal.preferredDays,
+                planStartDate = startDate
+            )
+
+            Log.i(TAG, "✅ RUNNING-GOAL GENERATION COMPLETE. Created ${runningGoalPlans.size} workouts.")
+            return if (runningGoalPlans.isEmpty()) {
+                GenerationResult.Failure(
+                    reason = "No running-goal plans were generated",
+                    details = "The running-goal path completed but produced no plans. Check the running goal inputs and preferred days."
+                )
+            } else {
+                GenerationResult.Success(runningGoalPlans)
+            }
         }
 
         val userProfile = repository.getUserProfileOnce()

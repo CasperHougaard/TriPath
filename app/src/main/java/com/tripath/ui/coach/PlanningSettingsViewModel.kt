@@ -3,6 +3,7 @@ package com.tripath.ui.coach
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.preferences.PreferencesManager
+import com.tripath.domain.running.RunningGoal
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +18,8 @@ data class PlanningSettingsState(
     val strengthSpacingHours: Int = 48,
     val rampRateLimit: Float = 5.0f,
     val mechanicalLoadMonitoring: Boolean = true,
-    val allowCommuteExemption: Boolean = true
+    val allowCommuteExemption: Boolean = true,
+    val activeRunningGoal: RunningGoal? = null
 )
 
 @HiltViewModel
@@ -42,13 +44,17 @@ class PlanningSettingsViewModel @Inject constructor(
     ) { smartPlanning: Boolean, consecutive: Boolean, spacing: Int, rampRate: Float, monitoring: Boolean ->
         FirstFiveSettings(smartPlanning, consecutive, spacing, rampRate, monitoring)
     }.combine(preferencesManager.allowCommuteExemptionFlow) { first5: FirstFiveSettings, commute: Boolean ->
+        Pair(first5, commute)
+    }.combine(preferencesManager.activeRunningGoalFlow) { statePair: Pair<FirstFiveSettings, Boolean>, activeRunningGoal: RunningGoal? ->
+        val first5 = statePair.first
         PlanningSettingsState(
             isSmartPlanningEnabled = first5.smartPlanning,
             runConsecutiveAllowed = first5.consecutive,
             strengthSpacingHours = first5.spacing,
             rampRateLimit = first5.rampRate,
             mechanicalLoadMonitoring = first5.monitoring,
-            allowCommuteExemption = commute
+            allowCommuteExemption = statePair.second,
+            activeRunningGoal = activeRunningGoal
         )
     }.stateIn(
         scope = viewModelScope,
@@ -89,6 +95,18 @@ class PlanningSettingsViewModel @Inject constructor(
     fun setAllowCommuteExemption(allowed: Boolean) {
         viewModelScope.launch {
             preferencesManager.setAllowCommuteExemption(allowed)
+        }
+    }
+
+    fun saveActiveRunningGoal(goal: RunningGoal) {
+        viewModelScope.launch {
+            preferencesManager.saveActiveRunningGoal(goal)
+        }
+    }
+
+    fun clearActiveRunningGoal() {
+        viewModelScope.launch {
+            preferencesManager.clearActiveRunningGoal()
         }
     }
 }

@@ -28,6 +28,9 @@ data class UserProfile(
     
     /** Weekly training hours goal */
     val weeklyHoursGoal: Float? = null,
+
+    /** Annual training volume goal in hours */
+    val annualVolumeGoalHours: Float? = null,
     
     /** Lactate Threshold Heart Rate for running (bpm) */
     val lthr: Int? = null,

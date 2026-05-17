@@ -2,7 +2,7 @@
 
 **Feature:** Recovery Hub  
 **Implementation Date:** December 2024  
-**Database Version:** 11 (upgraded from 10)  
+**Database Version:** 12 (current)  
 **Architecture:** MVVM with Clean Architecture
 
 ---
@@ -138,7 +138,8 @@ Provides reactive Flow-based queries and suspend functions for:
 - `app/src/main/java/com/tripath/data/local/database/migrations/Migration10To11.kt`
 
 **Migration Strategy:**
-- Database version incremented from 10 to 11
+- Database version incremented from 10 to 11 (Recovery Hub initial implementation)
+- Current database version: 12
 - Migration creates two new tables: `daily_wellness_logs` and `wellness_task_definitions`
 - Development fallback uses `fallbackToDestructiveMigration()` for schema mismatches
 

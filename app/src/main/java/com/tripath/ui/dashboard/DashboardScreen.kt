@@ -39,6 +39,8 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FitnessCenter
@@ -55,6 +57,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -82,6 +85,7 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
+import com.tripath.ui.dashboard.components.WeeklyActivityMatrix
 import com.tripath.ui.dashboard.components.WeeklyCalendarStrip
 import com.tripath.ui.model.FormStatus
 import com.tripath.ui.navigation.Screen
@@ -89,8 +93,10 @@ import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import com.tripath.ui.theme.toColor
 import kotlinx.coroutines.delay
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
 
 // ==================== Staggered Animation Components ====================
 
@@ -160,33 +166,8 @@ fun DashboardScreen(
                 }
             }
 
-            // 2. Today's Focus - Index 1
+            // 2. Weekly Overview - Index 1
             StaggeredAnimatedItem(index = 1) {
-                Column(
-                    modifier = Modifier.padding(horizontal = Spacing.lg),
-                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-                ) {
-                    Text(
-                        text = "Today's Focus",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    
-                    DayDetailCard(
-                        plan = uiState.selectedDatePlan,
-                        isRestDay = uiState.isRestDay,
-                        restDayMessage = uiState.restDayMessage,
-                        isWorkoutCompleted = uiState.isWorkoutCompleted,
-                        onWorkoutClick = { workoutId, isPlanned ->
-                            navController.navigate(Screen.WorkoutDetail.createRoute(workoutId, isPlanned))
-                        }
-                    )
-                }
-            }
-
-            // 3. Weekly Overview - Index 2
-            StaggeredAnimatedItem(index = 2) {
                 Column(
                     modifier = Modifier.padding(horizontal = Spacing.lg),
                     verticalArrangement = Arrangement.spacedBy(Spacing.sm)
@@ -197,7 +178,7 @@ fun DashboardScreen(
                         verticalAlignment = Alignment.Bottom
                     ) {
                         Text(
-                            text = "This Week",
+                            text = uiState.visibleWeekStart.toWeekHeading(),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -208,45 +189,61 @@ fun DashboardScreen(
                         )
                     }
 
-                    // Weekly Load Progress Chart
-                    WeeklyTssChart(
-                        actual = uiState.weeklyActualTSS,
-                        planned = uiState.weeklyPlannedTSS,
-                        allowed = uiState.weeklyAllowedTSS
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        WeekNavigationButton(
+                            icon = Icons.Default.ChevronLeft,
+                            contentDescription = "Previous week",
+                            onClick = { viewModel.showPreviousWeek() }
+                        )
+
+                        WeeklyTssChart(
+                            actual = uiState.weeklyActualTSS,
+                            planned = uiState.weeklyPlannedTSS,
+                            allowed = uiState.weeklyAllowedTSS,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        WeekNavigationButton(
+                            icon = Icons.Default.ChevronRight,
+                            contentDescription = "Next week",
+                            onClick = { viewModel.showNextWeek() }
+                        )
+                    }
                     Spacer(modifier = Modifier.height(Spacing.xs))
 
                     WeeklyCalendarStrip(
                         weekDayStatuses = uiState.weekDayStatuses,
-                        onDateSelected = { date -> viewModel.selectDate(date) }
+                        onDateSelected = { date ->
+                            viewModel.selectDate(date)
+                            navController.navigate(Screen.DayDetail.createRoute(date))
+                        }
                     )
                 }
             }
 
-            // 4. Completed Logs (if any for selected day) - Index 3
-            if (uiState.selectedDateLogs.isNotEmpty()) {
-                StaggeredAnimatedItem(index = 3) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = Spacing.lg),
-                        verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-                    ) {
-                        Text(
-                            text = "Completed Activities",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
-                            modifier = Modifier.padding(top = Spacing.sm)
-                        )
-                        
-                        uiState.selectedDateLogs.forEach { log ->
-                            CompletedActivityRow(
-                                workout = log,
-                                onClick = {
-                                    navController.navigate(Screen.WorkoutDetail.createRoute(log.connectId, false))
-                                }
-                            )
+            // 3. Compact Weekly Matrix - Index 2
+            StaggeredAnimatedItem(index = 2) {
+                Column(
+                    modifier = Modifier.padding(horizontal = Spacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.sm)
+                ) {
+                    Text(
+                        text = "Week Activity View",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    )
+                    WeeklyActivityMatrix(
+                        dayColumns = uiState.weekColumns,
+                        onDayClick = { date ->
+                            viewModel.selectDate(date)
+                            navController.navigate(Screen.DayDetail.createRoute(date))
                         }
-                    }
+                    )
                 }
             }
 
@@ -396,7 +393,12 @@ private fun MetricRow(label: String, value: String, color: Color) {
 }
 
 @Composable
-private fun WeeklyTssChart(actual: Int, planned: Int, allowed: Int) {
+private fun WeeklyTssChart(
+    actual: Int,
+    planned: Int,
+    allowed: Int,
+    modifier: Modifier = Modifier
+) {
     val maxTss = maxOf(actual, planned, allowed, 100).toFloat()
     
     // Animate proportions
@@ -434,7 +436,7 @@ private fun WeeklyTssChart(actual: Int, planned: Int, allowed: Int) {
     }
 
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Box(
@@ -561,6 +563,13 @@ private fun RestDayContent(message: String) {
 @Composable
 private fun WorkoutPlanContent(plan: TrainingPlan, isCompleted: Boolean) {
     val color = plan.type.toColor()
+    val summaryText = buildList {
+        plan.plannedDistanceMeters?.let {
+            add("${"%.1f".format(it / 1000.0)} km est")
+        }
+        add("${plan.durationMinutes} min")
+        add("${plan.plannedTSS} TSS")
+    }.joinToString(" • ")
     
     Column(
         modifier = Modifier
@@ -596,7 +605,7 @@ private fun WorkoutPlanContent(plan: TrainingPlan, isCompleted: Boolean) {
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${plan.durationMinutes} min • ${plan.plannedTSS} TSS",
+                        text = summaryText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
@@ -644,6 +653,33 @@ private fun WorkoutPlanContent(plan: TrainingPlan, isCompleted: Boolean) {
                     DetailItem(label = "INTENSITY", value = formatIntensity(plan.intensity))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WeekNavigationButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+        shadowElevation = 0.dp
+    ) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier.size(34.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+            )
         }
     }
 }
@@ -744,6 +780,8 @@ private fun WorkoutType.toIcon(): ImageVector {
         WorkoutType.SWIM -> Icons.Default.Pool
         WorkoutType.STRENGTH -> Icons.Default.FitnessCenter
         WorkoutType.OTHER -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.WALK -> Icons.AutoMirrored.Filled.DirectionsWalk
+        WorkoutType.HIKE -> Icons.AutoMirrored.Filled.DirectionsWalk
     }
 }
 
@@ -763,6 +801,21 @@ private fun formatIntensity(intensity: Intensity): String {
         Intensity.HEAVY, Intensity.HIGH -> "Heavy"
         Intensity.MODERATE -> "Moderate"
     }
+}
+
+private fun LocalDate.toWeekHeading(): String {
+    val currentWeekStart = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    if (this == currentWeekStart) return "This Week"
+
+    val weekEnd = plusDays(6)
+    val startFormatter = DateTimeFormatter.ofPattern("MMM d")
+    val endFormatter = if (month == weekEnd.month) {
+        DateTimeFormatter.ofPattern("d")
+    } else {
+        DateTimeFormatter.ofPattern("MMM d")
+    }
+
+    return "${format(startFormatter)} - ${weekEnd.format(endFormatter)}"
 }
 
 @Preview(showBackground = true)

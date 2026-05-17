@@ -31,6 +31,12 @@ data class TrainingPlan(
     
     /** Planned Training Stress Score */
     val plannedTSS: Int,
+
+    /**
+     * Planned distance in meters.
+     * Primarily used for run workouts; null for non-distance-based or non-run workouts.
+     */
+    val plannedDistanceMeters: Int? = null,
     
     /** 
      * Strength training focus area. 

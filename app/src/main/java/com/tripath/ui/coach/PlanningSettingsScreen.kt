@@ -32,6 +32,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -42,9 +43,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tripath.data.model.TrainingBalance
 import com.tripath.ui.components.SectionHeader
+import com.tripath.ui.coach.components.RunningGoalEditorDialog
 import com.tripath.ui.coach.components.WeeklyScheduleSection
 import com.tripath.ui.theme.Spacing
 import java.time.DayOfWeek
+import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,6 +65,7 @@ fun PlanningSettingsScreen(
     val generationError by coachViewModel.generationError.collectAsStateWithLifecycle()
     val generationSuccess by coachViewModel.generationSuccess.collectAsStateWithLifecycle()
     val userProfile = coachUiState.userProfile
+    var showRunningGoalDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -120,7 +124,7 @@ fun PlanningSettingsScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Master control for AI-powered training plan generation",
+                                    text = "Turns Coach generation on or off. The actual plan mode is shown below.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                     modifier = Modifier.padding(top = Spacing.xs)
@@ -133,6 +137,17 @@ fun PlanningSettingsScreen(
                         }
                     }
                 }
+
+                SectionHeader(
+                    title = "Current Plan Mode",
+                    subtitle = "What Coach will generate right now"
+                )
+
+                PlanningModeCard(
+                    isSmartPlanningEnabled = uiState.isSmartPlanningEnabled,
+                    hasActiveRunningGoal = uiState.activeRunningGoal != null,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
                 // Section 2: Injury Prevention
                 SectionHeader(
@@ -554,13 +569,28 @@ fun PlanningSettingsScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Section 6: Auto-Pilot Generation
+                // Section 6: Running Goal
+                SectionHeader(
+                    title = "Running Goal",
+                    subtitle = "Create, edit, clear, and generate a running-focused plan"
+                )
+
+                RunningGoalCard(
+                    activeGoal = uiState.activeRunningGoal,
+                    onCreateOrEdit = { showRunningGoalDialog = true },
+                    onClear = { viewModel.clearActiveRunningGoal() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // Section 7: Auto-Pilot Generation
                 SectionHeader(
                     title = "Auto-Pilot Generation",
                     subtitle = "Generate training plan using Iron Brain"
                 )
 
                 AutoPilotGenerationCard(
+                    isSmartPlanningEnabled = uiState.isSmartPlanningEnabled,
+                    hasActiveRunningGoal = uiState.activeRunningGoal != null,
                     isGenerating = isGenerating,
                     generationError = generationError,
                     generationSuccess = generationSuccess,
@@ -574,10 +604,23 @@ fun PlanningSettingsScreen(
             }
         }
     }
+
+    if (showRunningGoalDialog) {
+        RunningGoalEditorDialog(
+            initialState = RunningGoalEditorState.fromGoal(uiState.activeRunningGoal),
+            onDismiss = { showRunningGoalDialog = false },
+            onSave = { editorState ->
+                editorState.toRunningGoalOrNull()?.let(viewModel::saveActiveRunningGoal)
+                showRunningGoalDialog = false
+            }
+        )
+    }
 }
 
 @Composable
 fun AutoPilotGenerationCard(
+    isSmartPlanningEnabled: Boolean,
+    hasActiveRunningGoal: Boolean,
     isGenerating: Boolean,
     generationError: String?,
     generationSuccess: Int?,
@@ -599,12 +642,26 @@ fun AutoPilotGenerationCard(
             verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Text(
-                text = "Generate Training Plan",
+                text = when {
+                    !isSmartPlanningEnabled -> "Coach Generation Is Off"
+                    hasActiveRunningGoal -> "Generate Running-Only Plan"
+                    else -> "Generate Full Coach Plan"
+                },
                 style = MaterialTheme.typography.titleMedium
             )
             
             Text(
-                text = "Automatically generate a training plan based on your profile, current fitness, and Iron Brain rules.",
+                text = when {
+                    !isSmartPlanningEnabled -> {
+                        "Smart Planning must be turned on above before Coach can generate a plan."
+                    }
+                    hasActiveRunningGoal -> {
+                        "Smart Planning is on, but Coach is currently in run-only mode because a running goal is saved. Generating now will not also build the full Ironman swim-bike-run mix."
+                    }
+                    else -> {
+                        "Coach is in full multi-sport mode. Generating now will build your normal Ironman-style plan from profile, fitness, and Iron Brain rules."
+                    }
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
@@ -654,7 +711,7 @@ fun AutoPilotGenerationCard(
             
             Button(
                 onClick = { onGenerate(selectedMonths) },
-                enabled = !isGenerating,
+                enabled = !isGenerating && isSmartPlanningEnabled,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (isGenerating) {
@@ -665,7 +722,15 @@ fun AutoPilotGenerationCard(
                     Spacer(modifier = Modifier.padding(Spacing.sm))
                     Text("Generating...")
                 } else {
-                    Text("Generate ${selectedMonths}-Month Plan")
+                    Text(
+                        when {
+                            !isSmartPlanningEnabled -> "Turn On Smart Planning First"
+                            hasActiveRunningGoal -> {
+                            "Generate ${selectedMonths}-Month Running Plan"
+                            }
+                            else -> "Generate ${selectedMonths}-Month Ironman Plan"
+                        }
+                    )
                 }
             }
             
@@ -730,6 +795,107 @@ fun AutoPilotGenerationCard(
 }
 
 @Composable
+private fun PlanningModeCard(
+    isSmartPlanningEnabled: Boolean,
+    hasActiveRunningGoal: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val activeModeLabel = when {
+        !isSmartPlanningEnabled -> "Coach Off"
+        hasActiveRunningGoal -> "Run-Only Coach"
+        else -> "Ironman / Full Coach"
+    }
+
+    val supportingText = when {
+        !isSmartPlanningEnabled -> "Coach will not generate any plan until Smart Planning is turned on."
+        hasActiveRunningGoal -> "A running goal is saved, so Coach will generate a running-only plan. Smart Planning stays on because it powers generation, but it does not also create the full triathlon plan while this mode is active."
+        else -> "Coach will generate the normal multi-sport plan across swim, bike, run, and strength based on your profile and settings."
+    }
+
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Text(
+                text = activeModeLabel,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            ) {
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = { Text("Ironman / Full") },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = if (isSmartPlanningEnabled && !hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                        labelColor = if (isSmartPlanningEnabled && !hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                        },
+                        disabledContainerColor = if (isSmartPlanningEnabled && !hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                        disabledLabelColor = if (isSmartPlanningEnabled && !hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                        }
+                    )
+                )
+                AssistChip(
+                    onClick = {},
+                    enabled = false,
+                    label = { Text("Run-Only") },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor = if (isSmartPlanningEnabled && hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                        labelColor = if (isSmartPlanningEnabled && hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                        },
+                        disabledContainerColor = if (isSmartPlanningEnabled && hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        },
+                        disabledLabelColor = if (isSmartPlanningEnabled && hasActiveRunningGoal) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                        }
+                    )
+                )
+            }
+
+            Text(
+                text = supportingText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun TrainingBalancePresetChip(
     label: String,
     target: TrainingBalance,
@@ -754,6 +920,87 @@ private fun TrainingBalancePresetChip(
             }
         )
     )
+}
+
+@Composable
+private fun RunningGoalCard(
+    activeGoal: com.tripath.domain.running.RunningGoal?,
+    onCreateOrEdit: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
+
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            if (activeGoal == null) {
+                Text(
+                    text = "No active running goal saved. Add one to generate a running-focused plan using the existing Planner and Dashboard.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Button(
+                    onClick = onCreateOrEdit,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Create Running Goal")
+                }
+            } else {
+                Text(
+                    text = when (activeGoal.type) {
+                        com.tripath.domain.running.RunningGoalType.COMPLETE_DISTANCE -> "Complete Distance"
+                        com.tripath.domain.running.RunningGoalType.CONSISTENCY -> "Run Consistently"
+                        com.tripath.domain.running.RunningGoalType.ENDURANCE -> "Build Endurance"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                activeGoal.targetDistanceMeters?.let {
+                    Text("Target distance: ${it / 1000.0} km")
+                }
+                activeGoal.targetDate?.let {
+                    Text("Target date: ${it.format(formatter)}")
+                }
+                activeGoal.runsPerWeek?.let {
+                    Text("Runs per week: $it")
+                }
+                if (!activeGoal.preferredDays.isNullOrEmpty()) {
+                    Text("Preferred days: ${activeGoal.preferredDays.joinToString { it.name.take(3) }}")
+                }
+                activeGoal.baselineLongestRunMeters?.let {
+                    Text("Current longest comfortable run: ${it / 1000.0} km")
+                }
+                activeGoal.baselineWeeklyRunMeters?.let {
+                    Text("Current weekly running volume: ${it / 1000.0} km")
+                }
+                Text(
+                    text = "Run-only coach mode is active while this goal is saved. Use Generate Plan below to build a running-focused plan in the existing Planner and Dashboard.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                    Button(
+                        onClick = onCreateOrEdit,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Edit Goal")
+                    }
+                    TextButton(
+                        onClick = onClear,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Clear Goal")
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

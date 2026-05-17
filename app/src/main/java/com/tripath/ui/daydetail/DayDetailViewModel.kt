@@ -81,6 +81,18 @@ class DayDetailViewModel @Inject constructor(
         }
     }
 
+    fun moveActivityToDate(activity: TrainingPlan, newDate: LocalDate) {
+        viewModelScope.launch {
+            repository.updateTrainingPlan(activity.copy(date = newDate))
+        }
+    }
+
+    fun dropMissedRun(activity: TrainingPlan) {
+        viewModelScope.launch {
+            repository.deleteTrainingPlan(activity)
+        }
+    }
+
     fun deleteActivity(activity: TrainingPlan) {
         viewModelScope.launch {
             repository.deleteTrainingPlan(activity)

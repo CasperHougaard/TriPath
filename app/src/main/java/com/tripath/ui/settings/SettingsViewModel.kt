@@ -64,7 +64,7 @@ class SettingsViewModel @Inject constructor(
     private val healthConnectManager: HealthConnectManager,
     private val preferencesManager: PreferencesManager,
     private val repository: TrainingRepository,
-    private val application: Application
+    private val application: Application,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -438,6 +438,7 @@ class SettingsViewModel @Inject constructor(
             profileSaveError = null
         )
     }
+
     
     /**
      * Update 10km time and calculate threshold pace.
@@ -524,20 +525,22 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
             
-            // Get current profile or create new one
+            // Get current profile or create new one, preserving unrelated settings.
             val currentProfile = _uiState.value.userProfile
-            val updatedProfile = UserProfile(
+            val updatedProfile = currentProfile?.copy(
                 ftpBike = ftpBike,
                 maxHeartRate = maxHeartRate,
                 lthr = lthr,
                 cssSecondsper100m = cssSeconds,
                 thresholdRunPace = thresholdRunPace,
-                goalDate = goalDate,
-                // Preserve other fields from current profile
-                defaultSwimTSS = currentProfile?.defaultSwimTSS,
-                defaultStrengthHeavyTSS = currentProfile?.defaultStrengthHeavyTSS,
-                defaultStrengthLightTSS = currentProfile?.defaultStrengthLightTSS,
-                weeklyHoursGoal = currentProfile?.weeklyHoursGoal
+                goalDate = goalDate
+            ) ?: UserProfile(
+                ftpBike = ftpBike,
+                maxHeartRate = maxHeartRate,
+                lthr = lthr,
+                cssSecondsper100m = cssSeconds,
+                thresholdRunPace = thresholdRunPace,
+                goalDate = goalDate
             )
             
             try {

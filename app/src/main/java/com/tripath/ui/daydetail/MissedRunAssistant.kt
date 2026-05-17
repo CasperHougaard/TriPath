@@ -1,0 +1,46 @@
+package com.tripath.ui.daydetail
+
+import com.tripath.data.local.database.entities.TrainingPlan
+import com.tripath.data.local.database.entities.WorkoutLog
+import com.tripath.data.model.WorkoutType
+import java.time.LocalDate
+
+enum class MissedRunAction {
+    MOVE_TO_TOMORROW,
+    MOVE_TO_CUSTOM_DATE,
+    DROP
+}
+
+data class MissedRunAssistantState(
+    val isEligible: Boolean,
+    val actions: List<MissedRunAction> = emptyList()
+)
+
+fun buildMissedRunAssistantState(
+    activity: TrainingPlan,
+    completedWorkouts: List<WorkoutLog>,
+    today: LocalDate = LocalDate.now()
+): MissedRunAssistantState {
+    val isEligible = activity.type == WorkoutType.RUN &&
+        activity.date.isBefore(today) &&
+        completedWorkouts.none { workout ->
+            workout.type == WorkoutType.RUN && workout.date == activity.date
+        }
+
+    return if (isEligible) {
+        MissedRunAssistantState(
+            isEligible = true,
+            actions = defaultMissedRunActions()
+        )
+    } else {
+        MissedRunAssistantState(isEligible = false)
+    }
+}
+
+fun defaultMissedRunActions(): List<MissedRunAction> = listOf(
+    MissedRunAction.MOVE_TO_TOMORROW,
+    MissedRunAction.MOVE_TO_CUSTOM_DATE,
+    MissedRunAction.DROP
+)
+
+fun missedRunTomorrowDate(today: LocalDate = LocalDate.now()): LocalDate = today.plusDays(1)

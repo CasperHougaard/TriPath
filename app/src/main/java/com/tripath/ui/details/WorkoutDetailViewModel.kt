@@ -3,16 +3,22 @@ package com.tripath.ui.details
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.TrainingPlan
+import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.model.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.RoutePoint
+import com.tripath.domain.running.RunningGoal
+import com.tripath.domain.running.RunningGoalType
+import com.tripath.domain.running.runningSessionTypeFromPlanSubType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import java.time.temporal.ChronoUnit
+import kotlin.math.ceil
 import javax.inject.Inject
 
 /**
@@ -22,8 +28,12 @@ data class WorkoutDetailUiState(
     val trainingPlan: TrainingPlan? = null,
     val workoutLog: WorkoutLog? = null,
     val userProfile: UserProfile? = null,
+    val activeRunningGoal: RunningGoal? = null,
+    val structuredRunWeekIndex: Int? = null,
+    val structuredRunTotalWeeks: Int? = null,
     val linkedPlan: TrainingPlan? = null, // For TSS comparison with completed logs
     val route: List<RoutePoint>? = null,
+    val rawWorkoutData: com.tripath.data.local.database.entities.RawWorkoutData? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
     val isPlanned: Boolean = false
@@ -35,13 +45,38 @@ data class WorkoutDetailUiState(
  */
 @HiltViewModel
 class WorkoutDetailViewModel @Inject constructor(
-    private val repository: TrainingRepository
+    private val repository: TrainingRepository,
+    private val preferencesManager: PreferencesManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WorkoutDetailUiState())
     val uiState: StateFlow<WorkoutDetailUiState> = _uiState.asStateFlow()
     
     private val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * Move a planned workout to a new date.
+     * Only allowed if the workout is planned (not completed).
+     */
+    fun moveTrainingPlan(planId: String, newDate: java.time.LocalDate, onMoved: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val plan = repository.getTrainingPlanById(planId)
+                if (plan != null) {
+                    val updatedPlan = plan.copy(date = newDate)
+                    repository.updateTrainingPlan(updatedPlan)
+                    if (_uiState.value.trainingPlan?.id == planId) {
+                        _uiState.value = _uiState.value.copy(trainingPlan = updatedPlan)
+                    }
+                    onMoved()
+                } else {
+                    _uiState.value = _uiState.value.copy(error = "Workout not found")
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = "Failed to move workout: ${e.message}")
+            }
+        }
+    }
 
     /**
      * Load workout data based on ID and type
@@ -58,9 +93,14 @@ class WorkoutDetailViewModel @Inject constructor(
                     // Load planned workout
                     val plan = repository.getTrainingPlanById(workoutId)
                     if (plan != null) {
+                        val activeRunningGoal = preferencesManager.getActiveRunningGoal()
+                        val structuredRunWeekContext = deriveStructuredRunWeekContext(plan, activeRunningGoal)
                         _uiState.value = _uiState.value.copy(
                             trainingPlan = plan,
                             userProfile = profile,
+                            activeRunningGoal = activeRunningGoal,
+                            structuredRunWeekIndex = structuredRunWeekContext?.weekIndex,
+                            structuredRunTotalWeeks = structuredRunWeekContext?.totalWeeks,
                             isLoading = false
                         )
                     } else {
@@ -91,6 +131,7 @@ class WorkoutDetailViewModel @Inject constructor(
                             linkedPlan = linkedPlan,
                             userProfile = profile,
                             route = route,
+                            rawWorkoutData = rawData,
                             isLoading = false
                         )
                     } else {
@@ -123,6 +164,47 @@ class WorkoutDetailViewModel @Inject constructor(
             null
         }
     }
+
+    private suspend fun deriveStructuredRunWeekContext(
+        plan: TrainingPlan,
+        activeRunningGoal: RunningGoal?
+    ): StructuredRunWeekContext? {
+        val goal = activeRunningGoal ?: return null
+        val targetDate = goal.targetDate ?: return null
+        if (goal.type != RunningGoalType.COMPLETE_DISTANCE || plan.type != com.tripath.data.model.WorkoutType.RUN) {
+            return null
+        }
+        if (runningSessionTypeFromPlanSubType(plan.subType) == null || plan.date.isAfter(targetDate)) {
+            return null
+        }
+
+        val planStartDate = repository.getAllTrainingPlansOnce()
+            .asSequence()
+            .filter { trainingPlan ->
+                trainingPlan.type == com.tripath.data.model.WorkoutType.RUN &&
+                    runningSessionTypeFromPlanSubType(trainingPlan.subType) != null &&
+                    !trainingPlan.date.isAfter(targetDate)
+            }
+            .map { it.date }
+            .minOrNull()
+            ?: return null
+
+        if (plan.date.isBefore(planStartDate)) {
+            return null
+        }
+
+        val totalWeeks = ceil(ChronoUnit.DAYS.between(planStartDate, targetDate) / 7.0).toInt().coerceAtLeast(1)
+        val weekIndex = ChronoUnit.WEEKS.between(planStartDate, plan.date).toInt() + 1
+        return StructuredRunWeekContext(
+            weekIndex = weekIndex.coerceIn(1, totalWeeks),
+            totalWeeks = totalWeeks
+        )
+    }
+
+    private data class StructuredRunWeekContext(
+        val weekIndex: Int,
+        val totalWeeks: Int
+    )
 
     /**
      * Delete the current workout
@@ -192,5 +274,6 @@ class WorkoutDetailViewModel @Inject constructor(
         val remainingSeconds = seconds % 60
         return if (minutes > 0) "${minutes}m ${remainingSeconds}s" else "${remainingSeconds}s"
     }
+
 }
 

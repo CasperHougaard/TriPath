@@ -14,6 +14,8 @@ fun WorkoutType.toColor(): Color {
         WorkoutType.STRENGTH -> Color(0xFF9C27B0)  // Purple - Visually distinct and dominant
         WorkoutType.BIKE -> Color(0xFF1565C0)      // Triathlon Blue
         WorkoutType.OTHER -> Color(0xFF607D8B)     // Blue Grey - Neutral but visible
+        WorkoutType.WALK -> Color(0xFF43A047)      // Green - for walking
+        WorkoutType.HIKE -> Color(0xFF795548)      // Brown - for hiking
     }
 }
 

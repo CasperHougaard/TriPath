@@ -1,7 +1,7 @@
 # TriPath Development Status Log
 
 **Last Updated:** January 2025  
-**Database Version:** 11  
+**Database Version:** 12  
 **Min SDK:** 33 | **Target SDK:** 35
 
 ---
@@ -32,7 +32,7 @@
 
 | Component | Status | Details |
 |-----------|--------|---------|
-| Room Database | ✅ | Version 11, 8 entities with explicit migrations |
+| Room Database | ✅ | Version 12, 9 entities with explicit migrations |
 | `TrainingPlan` entity | ✅ | Planned workouts with TSS, duration, type, strength focus |
 | `WorkoutLog` entity | ✅ | Synced workouts with HR, distance, speed, power, steps |
 | `UserProfile` entity | ✅ | FTP, max HR, LTHR, CSS (Stored in DataStore) |
@@ -76,7 +76,7 @@
 | **Weekly Planner** | ✅ | 7-day view, add/delete workouts, week navigation |
 | **Statistics** | ✅ | Period selector, TSS trend chart, volume chart, discipline breakdown, key metrics |
 | **Progress (CTL/ATL)** | ✅ | CTL/ATL/TSB trends, Form status visualization, 90-day history |
-| **Coach** | ✅ | AI-driven assessment, phase timeline, manual interventions (Injury/Holiday/Recovery) |
+| **Coach** | ✅ | AI-driven assessment, phase timeline, manual interventions (Injury/Holiday/Recovery), Auto-Pilot plan generation, Readiness calculation, Smart planning rules |
 | **Recovery** | ✅ | Daily wellness logging, nutrition targets, recovery tasks, coach advice |
 | **Recovery History** | ✅ | Historical wellness data visualization with trends and correlations |
 | **Settings** | ✅ | User profile editing, Health Connect sync, backup/restore, theme toggle |
@@ -85,6 +85,7 @@
 | **Synced Exercises** | ✅ | Health Connect exercise import history and management |
 | **Exercise Import Detail** | ✅ | Detailed view of imported exercise data |
 | **Profile Editor** | ✅ | User profile editing (FTP, HR zones, CSS) |
+| **Planning Settings** | ✅ | Smart planning configuration, rule settings, auto-pilot generation |
 
 ### 5. UI Components (100% Complete)
 
@@ -131,7 +132,18 @@
 | Schema versioning | ✅ | `BACKUP_VERSION = 1` |
 | Clear all data | ✅ | Full database reset capability |
 
-### 9. Preferences (100% Complete)
+### 9. Smart Planning System (Iron Brain) (100% Complete)
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| TrainingRulesEngine | ✅ | Validation engine for training plan rules |
+| Readiness Calculation | ✅ | TSB + Sleep + Wellness metrics (50/30/20 weighted) |
+| Plan Validation Rules | ✅ | Consecutive runs, strength spacing, mechanical load, allergy protocol |
+| Auto-Pilot Generation | ✅ | Phase-aware plan generation with rule validation |
+| Planning Settings | ✅ | Configurable rules via PlanningSettingsScreen |
+| Coach Warnings | ✅ | Real-time validation warnings and alerts |
+
+### 10. Preferences (100% Complete)
 
 | Preference | Status | Details |
 |------------|--------|---------|
@@ -207,7 +219,7 @@ com.tripath/
 ├── data/
 │   ├── local/
 │   │   ├── backup/         → BackupManager, LocalDateSerializer
-│   │   ├── database/       → AppDatabase (v11), DAOs, Entities, Converters, Migrations
+│   │   ├── database/       → AppDatabase (v12), DAOs, Entities, Converters, Migrations
 │   │   ├── healthconnect/  → HealthConnectManager
 │   │   ├── preferences/    → PreferencesManager (DataStore)
 │   │   └── repository/     → TrainingRepository, RecoveryRepository interfaces + impls
@@ -249,10 +261,10 @@ com.tripath/
 
 - **Kotlin Source Files:** ~80+
 - **UI Components:** 8+ reusable, 12+ screen-specific
-- **Database Entities:** 8 (TrainingPlan, WorkoutLog, SpecialPeriod, DayNote, DayTemplate, RawWorkoutData, SleepLog, DailyWellnessLog, WellnessTaskDefinition)
-- **ViewModels:** 8+ (Dashboard, Planner, Stats, Coach, Recovery, Progress, Settings, DayDetail)
+- **Database Entities:** 9 (TrainingPlan, WorkoutLog, SpecialPeriod, DayNote, DayTemplate, RawWorkoutData, SleepLog, DailyWellnessLog, WellnessTaskDefinition)
+- **ViewModels:** 9+ (Dashboard, Planner, Stats, Coach, Recovery, Progress, Settings, DayDetail, RecoveryHistory)
 - **Health Connect Permissions:** 7
-- **Database Version:** 11
+- **Database Version:** 12
 
 ---
 
@@ -274,6 +286,9 @@ For a releasable MVP, complete:
 - [x] Recovery History visualization
 - [x] Sleep data integration from Health Connect
 - [x] Raw workout data storage for reprocessing
+- [x] Smart Planning System (Iron Brain) with validation rules
+- [x] Auto-Pilot plan generation
+- [x] Readiness calculation and coach warnings
 
 ---
 

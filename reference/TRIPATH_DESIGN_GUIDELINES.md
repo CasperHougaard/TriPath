@@ -680,7 +680,7 @@ SingleChoiceSegmentedButtonRow(
 }
 ```
 
-**Usage:** Time range selection (Week, Month, 3 Months, etc.) in Recovery History and Statistics screens.
+**Usage:** Time range selection (Week, Month, 3 Months, etc.) in Statistics screens.
 
 ## Charts and Data Visualization
 
@@ -732,10 +732,8 @@ TriPath includes custom chart components for specialized visualizations:
 - **Usage:** Heart rate zone distribution, power zone analysis
 - **Features:** Pie/bar chart visualization, sport color integration
 
-#### Canvas-Based Charts (Recovery History)
-- **Usage:** Custom dual-axis charts, readiness vs load visualization
-- **Pattern:** Direct Canvas drawing for maximum flexibility
-- **Best Practice:** Use `rememberTextMeasurer()` for text rendering, maintain consistent stroke widths and colors
+#### Canvas-Based Charts
+// Recovery History patterns removed.
 
 ## Empty States
 

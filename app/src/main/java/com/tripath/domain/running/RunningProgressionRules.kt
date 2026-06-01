@@ -42,6 +42,7 @@ object RunningProgressionRules {
 
     private fun generateCompleteDistance(goal: RunningGoal, planStartDate: LocalDate): RunningProgressionResult {
         val warnings = mutableListOf<RunningProgressionWarning>()
+        val maxProgress = goal.maxWeeklyProgressPercent?.toDouble() ?: MAX_WEEKLY_PROGRESS
         val targetDistance = goal.targetDistanceMeters
         val targetDate = goal.targetDate
         val runsPerWeek = goal.runsPerWeek ?: 3
@@ -130,7 +131,7 @@ object RunningProgressionRules {
         // This avoids false positives from post-recovery catch-up steps.
         val buildWeekCount = (1..weeks).count { w -> !((w % 4 == 0) && (w != weeks)) }
         val neededRate = Math.pow(targetDistance.toDouble() / startLongRun, 1.0 / buildWeekCount) - 1
-        if (neededRate > MAX_WEEKLY_PROGRESS) {
+        if (neededRate > maxProgress) {
             warnings += RunningProgressionWarning.AGGRESSIVE_PROGRESSION_REQUIRED
         }
         var prevLongRun = startLongRun.toDouble()
@@ -145,7 +146,7 @@ object RunningProgressionRules {
                     val remaining = targetDistance - prevLongRun
                     val stepsLeft = max(1, totalProgressionWeeks - (weekIdx - 1))
                     val next = prevLongRun + (remaining / stepsLeft)
-                    val maxAllowed = prevLongRun * (1 + MAX_WEEKLY_PROGRESS)
+                    val maxAllowed = prevLongRun * (1 + maxProgress)
                     val safeNext = minOf(next, maxAllowed, targetDistance.toDouble())
                     roundToNearest(safeNext.toInt(), ROUND_TO)
                 }
@@ -199,6 +200,7 @@ object RunningProgressionRules {
 
     private fun generateEndurance(goal: RunningGoal, planStartDate: LocalDate, openEndedWeeks: Int): RunningProgressionResult {
         val warnings = mutableListOf<RunningProgressionWarning>()
+        val maxProgress = goal.maxWeeklyProgressPercent?.toDouble() ?: MAX_WEEKLY_PROGRESS
         val runsPerWeek = goal.runsPerWeek ?: 3
         val baseline = goal.baselineLongestRunMeters
         if (baseline == null) {
@@ -222,7 +224,7 @@ object RunningProgressionRules {
         for (weekIdx in 1..openEndedWeeks) {
             val isRecovery = (weekIdx % 4 == 0)
             val longRun = if (isRecovery) roundToNearest((prevLongRun * RECOVERY_WEEK_FRACTION).toInt(), ROUND_TO)
-                          else roundToNearest((prevLongRun * (1 + MAX_WEEKLY_PROGRESS)).toInt(), ROUND_TO)
+                          else roundToNearest((prevLongRun * (1 + maxProgress)).toInt(), ROUND_TO)
             val easyRun = if (runsPerWeek > 1) roundToNearest((longRun * EASY_RUN_FRACTION).toInt(), ROUND_TO) else null
             val sessionDistances =
                 if (runsPerWeek == 1) listOf(longRun)

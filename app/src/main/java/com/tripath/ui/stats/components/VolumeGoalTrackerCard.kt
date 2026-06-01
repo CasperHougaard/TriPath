@@ -11,7 +11,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -26,7 +25,6 @@ import kotlin.math.abs
 fun VolumeGoalTrackerCard(
     annualGoalHours: Float?,
     progress: List<VolumeGoalProgress>,
-    onConfigureClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -38,19 +36,6 @@ fun VolumeGoalTrackerCard(
             verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             if (annualGoalHours == null) {
-                Text(
-                    text = "No annual volume goal set yet.",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "Add a yearly hours target and this card will show whether you are ahead or behind pace for the year, month, and week.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-                TextButton(onClick = onConfigureClick) {
-                    Text("Set goal")
-                }
                 return@Column
             }
 

@@ -141,59 +141,16 @@ class TrainingRulesEngine @Inject constructor(
         recentRuns: List<WorkoutLog>
     ): List<CoachWarning> {
         // Step 1: Check if Smart Planning is enabled
-        val smartEnabled = preferencesManager.smartPlanningEnabledFlow.first()
+        val smartEnabled = preferencesManager.autoPlannerEnabledFlow.first()
         if (!smartEnabled) {
             return emptyList() // Engine is OFF
         }
-
-        // Step 2: Load other preferences
-        val allowConsecutiveRuns = preferencesManager.runConsecutiveAllowedFlow.first()
-        val strengthSpacingHours = preferencesManager.strengthSpacingHoursFlow.first()
-        val monitorMechLoad = preferencesManager.mechanicalLoadMonitoringFlow.first()
-        val allowCommuteExemption = preferencesManager.allowCommuteExemptionFlow.first()
 
         val warnings = mutableListOf<CoachWarning>()
 
         // Early return if no plan for today
         if (todayPlan == null) {
             return warnings
-        }
-
-        // Rule 1: Run Frequency (Plate Protection)
-        if (!allowConsecutiveRuns && 
-            yesterday?.type == WorkoutType.RUN && 
-            todayPlan.type == WorkoutType.RUN) {
-            
-            // Exception: Skip if commute exemption is enabled and today is a commute
-            if (!(allowCommuteExemption && todayPlan.isCommute)) {
-                warnings.add(
-                    CoachWarning(
-                        type = WarningType.RULE_VIOLATION,
-                        title = "Consecutive Runs Blocked",
-                        message = "Running two days in a row is disabled in settings.",
-                        isBlocker = true
-                    )
-                )
-            }
-        }
-
-        // Rule 2: Strength Spacing
-        if (todayPlan.type == WorkoutType.STRENGTH && lastStrengthDate != null) {
-            val hoursSinceLastStrength = ChronoUnit.HOURS.between(
-                lastStrengthDate.atStartOfDay(),
-                LocalDate.now().atStartOfDay()
-            )
-            
-            if (hoursSinceLastStrength < strengthSpacingHours) {
-                warnings.add(
-                    CoachWarning(
-                        type = WarningType.RULE_VIOLATION,
-                        title = "Strength Spacing Violation",
-                        message = "Strength sessions must be ${strengthSpacingHours}h apart.",
-                        isBlocker = true
-                    )
-                )
-            }
         }
 
         // Rule 3: Heavy Legs Protocol
@@ -204,7 +161,7 @@ class TrainingRulesEngine @Inject constructor(
                     CoachWarning(
                         type = WarningType.RECOVERY_ADVICE,
                         title = "Post-Strength Protocol",
-                        message = "Post-Strength Rule: Consider Swim or Zone 1 Spin only.",
+                        message = "Post-Strength Rule: Prefer recovery work only, such as walking or very easy aerobic movement.",
                         isBlocker = false
                     )
                 )
@@ -223,40 +180,6 @@ class TrainingRulesEngine @Inject constructor(
                         isBlocker = true
                     )
                 )
-            }
-        }
-
-        // Rule 5: Mechanical Load (SSS) Monitor
-        if (monitorMechLoad) {
-            val today = LocalDate.now()
-            val fourteenDaysAgo = today.minusDays(14)
-            
-            // Filter recent runs to only RUN type from last 14 days (for comparison)
-            val recentRunLogs = recentRuns.filter { log ->
-                log.type == WorkoutType.RUN && 
-                !log.date.isBefore(fourteenDaysAgo) && 
-                !log.date.isAfter(today)
-            }.sortedBy { it.date } // Sort by date for proper week comparison
-            
-            if (recentRunLogs.size >= 14) {
-                // Calculate 7-day rolling SSS for current week (last 7 days)
-                val currentWeekRuns = recentRunLogs.takeLast(7)
-                val currentWeekSSS = calculateWeekSSS(currentWeekRuns)
-                
-                // Calculate 7-day rolling SSS for previous week (7-14 days ago)
-                val previousWeekRuns = recentRunLogs.dropLast(7).takeLast(7)
-                val previousWeekSSS = calculateWeekSSS(previousWeekRuns)
-                
-                if (previousWeekSSS > 0 && currentWeekSSS > previousWeekSSS * 1.15) {
-                    warnings.add(
-                        CoachWarning(
-                            type = WarningType.INJURY_RISK,
-                            title = "Mechanical Load Increase",
-                            message = "Mechanical load increased >15% vs previous week. Consider reducing run volume.",
-                            isBlocker = false
-                        )
-                    )
-                }
             }
         }
 
@@ -362,57 +285,13 @@ class TrainingRulesEngine @Inject constructor(
         recentRuns: List<Any>
     ): List<CoachWarning> {
         // Step 1: Check if Smart Planning is enabled
-        val smartEnabled = preferencesManager.smartPlanningEnabledFlow.first()
+        val smartEnabled = preferencesManager.autoPlannerEnabledFlow.first()
         if (!smartEnabled) {
             return emptyList() // Engine is OFF
         }
 
-        // Step 2: Load other preferences
-        val allowConsecutiveRuns = preferencesManager.runConsecutiveAllowedFlow.first()
-        val strengthSpacingHours = preferencesManager.strengthSpacingHoursFlow.first()
-        val monitorMechLoad = preferencesManager.mechanicalLoadMonitoringFlow.first()
-        val allowCommuteExemption = preferencesManager.allowCommuteExemptionFlow.first()
-
         val warnings = mutableListOf<CoachWarning>()
-
-        // Rule 1: Run Frequency (Plate Protection)
         val yesterdayType = extractWorkoutType(yesterday)
-        if (!allowConsecutiveRuns && 
-            yesterdayType == WorkoutType.RUN && 
-            todayPlan.type == WorkoutType.RUN) {
-            
-            // Exception: Skip if commute exemption is enabled and today is a commute
-            // Note: TrainingPlan doesn't have isCommute, so we skip this check for plans
-            // For now, we'll be conservative and block consecutive runs for plans
-            warnings.add(
-                CoachWarning(
-                    type = WarningType.RULE_VIOLATION,
-                    title = "Consecutive Runs Blocked",
-                    message = "Running two days in a row is disabled in settings.",
-                    isBlocker = true
-                )
-            )
-        }
-
-        // Rule 2: Strength Spacing
-        if (todayPlan.type == WorkoutType.STRENGTH && lastStrengthDate != null) {
-            val todayDate = todayPlan.date
-            val hoursSinceLastStrength = ChronoUnit.HOURS.between(
-                lastStrengthDate.atStartOfDay(),
-                todayDate.atStartOfDay()
-            )
-            
-            if (hoursSinceLastStrength < strengthSpacingHours) {
-                warnings.add(
-                    CoachWarning(
-                        type = WarningType.RULE_VIOLATION,
-                        title = "Strength Spacing Violation",
-                        message = "Strength sessions must be ${strengthSpacingHours}h apart.",
-                        isBlocker = true
-                    )
-                )
-            }
-        }
 
         // Rule 3: Heavy Legs Protocol
         if (yesterdayType == WorkoutType.STRENGTH && todayPlan.type != WorkoutType.SWIM) {
@@ -422,60 +301,10 @@ class TrainingRulesEngine @Inject constructor(
                     CoachWarning(
                         type = WarningType.RECOVERY_ADVICE,
                         title = "Post-Strength Protocol",
-                        message = "Post-Strength Rule: Consider Swim or Zone 1 Spin only.",
+                        message = "Post-Strength Rule: Prefer recovery work only, such as walking or very easy aerobic movement.",
                         isBlocker = false
                     )
                 )
-            }
-        }
-
-        // Rule 5: Mechanical Load (SSS) Monitor
-        if (monitorMechLoad) {
-            val todayDate = todayPlan.date
-            val fourteenDaysAgo = todayDate.minusDays(14)
-            
-            // Filter recent runs to only RUN type from last 14 days
-            val recentRunLogs = recentRuns.mapNotNull { item ->
-                when (item) {
-                    is WorkoutLog -> {
-                        if (item.type == WorkoutType.RUN && 
-                            !item.date.isBefore(fourteenDaysAgo) && 
-                            !item.date.isAfter(todayDate)) {
-                            item
-                        } else null
-                    }
-                    is TrainingPlan -> {
-                        if (item.type == WorkoutType.RUN && 
-                            !item.date.isBefore(fourteenDaysAgo) && 
-                            !item.date.isAfter(todayDate)) {
-                            // Convert TrainingPlan to WorkoutLog-like structure for SSS calculation
-                            // We'll use estimated distance based on duration and type
-                            null // Skip plans for now in SSS calculation (no distance data)
-                        } else null
-                    }
-                    else -> null
-                }
-            }.filterIsInstance<WorkoutLog>().sortedBy { it.date }
-            
-            if (recentRunLogs.size >= 14) {
-                // Calculate 7-day rolling SSS for current week (last 7 days)
-                val currentWeekRuns = recentRunLogs.takeLast(7)
-                val currentWeekSSS = calculateWeekSSS(currentWeekRuns)
-                
-                // Calculate 7-day rolling SSS for previous week (7-14 days ago)
-                val previousWeekRuns = recentRunLogs.dropLast(7).takeLast(7)
-                val previousWeekSSS = calculateWeekSSS(previousWeekRuns)
-                
-                if (previousWeekSSS > 0 && currentWeekSSS > previousWeekSSS * 1.15) {
-                    warnings.add(
-                        CoachWarning(
-                            type = WarningType.INJURY_RISK,
-                            title = "Mechanical Load Increase",
-                            message = "Mechanical load increased >15% vs previous week. Consider reducing run volume.",
-                            isBlocker = false
-                        )
-                    )
-                }
             }
         }
 

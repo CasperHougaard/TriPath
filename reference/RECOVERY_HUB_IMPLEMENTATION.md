@@ -1,3 +1,4 @@
+This document has been removed as the Recovery Hub feature is no longer part of the project.
 # Recovery Hub Implementation Documentation
 
 **Feature:** Recovery Hub  

@@ -7,13 +7,13 @@ This document captures the current Coach Planner logic and options as implemente
 | Layer | File | Responsibility |
 |---|---|---|
 | Screen | `CoachScreen.kt` | Main Coach UI: readiness, alerts, phase timeline, assessment, interventions |
-| Screen | `PlanningSettingsScreen.kt` | Coach settings UI and plan generation controls |
+| Screen | `AutoPlannerSettingsScreen.kt` | Auto-planner settings UI and plan generation controls |
 | ViewModel | `CoachViewModel.kt` | Loads coach data, readiness, alerts, special periods, and triggers generation |
-| ViewModel | `PlanningSettingsViewModel.kt` | Reads and writes coach planning preferences |
+| ViewModel | `AutoPlannerSettingsViewModel.kt` | Reads and writes coach planning preferences |
 | Domain | `CoachEngine.kt` | Calculates current training phase from goal date |
 | Domain | `TrainingMetricsCalculator.kt` | Calculates CTL, ATL, TSB, safe weekly TSS, and workout TSS |
 | Domain | `TrainingRulesEngine.kt` | Calculates readiness and validates plans against Iron Brain rules |
-| Domain | `CoachPlanGenerator.kt` | Generates multi-week training plans using anchors, budgets, and rule validation |
+| Domain | `AutoPlannerGenerator.kt` | Generates multi-week training plans using anchors, budgets, and rule validation |
 | Preferences | `PreferencesManager.kt` | Persists planner settings and user profile fields |
 | Models | `TrainingPhase.kt`, `CoachModels.kt`, `AnchorType.kt`, `TrainingBalance.kt`, `UserProfile.kt` | Planner-related types and configuration |
 
@@ -53,7 +53,7 @@ This document captures the current Coach Planner logic and options as implemente
 
 ### Top-bar action
 
-- Settings icon navigates to `PlanningSettingsScreen`.
+- Settings icon navigates to `AutoPlannerSettingsScreen`.
 
 ## Coach ViewModel Logic
 
@@ -525,7 +525,7 @@ The generator treats a placement as valid only when no returned warning has `isB
 
 ### Validation before generation
 
-`CoachPlanGenerator.validateProfileForGeneration()` checks:
+`AutoPlannerGenerator.validateProfileForGeneration()` checks:
 
 1. Profile exists
 2. Goal date exists
@@ -827,11 +827,11 @@ Fields set:
 
 ## Planning Settings Screen
 
-`PlanningSettingsScreen` exposes coach planner configuration.
+`AutoPlannerSettingsScreen` exposes planner auto-planner configuration.
 
 ### View model state
 
-`PlanningSettingsState` contains:
+`AutoPlannerSettingsState` contains:
 
 - `isSmartPlanningEnabled`
 - `runConsecutiveAllowed`
@@ -886,7 +886,7 @@ Fields set:
 
 ### Weekly schedule editing
 
-`PlanningSettingsScreen` also reads `CoachViewModel.uiState.userProfile` and uses coach components to edit scheduling-related structure.
+`AutoPlannerSettingsScreen` also reads `CoachViewModel.uiState.userProfile` and uses coach components to edit scheduling-related structure.
 
 This area is intended to support:
 - weekly anchor configuration
@@ -895,7 +895,7 @@ This area is intended to support:
 
 ## Planning Settings ViewModel
 
-`PlanningSettingsViewModel` is a thin preferences bridge.
+`AutoPlannerSettingsViewModel` is a thin preferences bridge.
 
 ### It combines these flows
 
@@ -1028,12 +1028,12 @@ Primary implementation sources for this document:
 
 - `app/src/main/java/com/tripath/ui/coach/CoachScreen.kt`
 - `app/src/main/java/com/tripath/ui/coach/CoachViewModel.kt`
-- `app/src/main/java/com/tripath/ui/coach/PlanningSettingsScreen.kt`
-- `app/src/main/java/com/tripath/ui/coach/PlanningSettingsViewModel.kt`
+- `app/src/main/java/com/tripath/ui/coach/AutoPlannerSettingsScreen.kt`
+- `app/src/main/java/com/tripath/ui/coach/AutoPlannerSettingsViewModel.kt`
 - `app/src/main/java/com/tripath/domain/CoachEngine.kt`
 - `app/src/main/java/com/tripath/domain/TrainingMetricsCalculator.kt`
 - `app/src/main/java/com/tripath/domain/coach/TrainingRulesEngine.kt`
-- `app/src/main/java/com/tripath/domain/coach/CoachPlanGenerator.kt`
+- `app/src/main/java/com/tripath/domain/coach/AutoPlannerGenerator.kt`
 - `app/src/main/java/com/tripath/data/local/preferences/PreferencesManager.kt`
 - `app/src/main/java/com/tripath/data/model/UserProfile.kt`
 - `app/src/main/java/com/tripath/data/model/TrainingBalance.kt`
@@ -1041,3 +1041,4 @@ Primary implementation sources for this document:
 - `app/src/main/java/com/tripath/domain/TrainingPhase.kt`
 - `app/src/main/java/com/tripath/domain/coach/CoachModels.kt`
 - `app/src/main/java/com/tripath/data/local/database/entities/SpecialPeriod.kt`
+

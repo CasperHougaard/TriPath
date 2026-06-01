@@ -5,7 +5,7 @@
 **IronBrain** is the nickname for TriPath's smart planning system. It consists of two main components:
 
 1. **TrainingRulesEngine** - The core validation and readiness calculation engine
-2. **CoachPlanGenerator** - The auto-pilot plan generation system
+2. **AutoPlannerGenerator** - The auto-pilot plan generation system
 
 Together, these form the "Iron Brain" that validates training plans and provides intelligent coaching guidance.
 
@@ -29,9 +29,9 @@ A singleton that:
 - `calculateReadiness()` - Calculates readiness score from recovery metrics
 - `calculateSSS()` - Calculates Structural Stress Score for mechanical load
 
-### 2. CoachPlanGenerator (Auto-Pilot)
+### 2. AutoPlannerGenerator (Auto-Pilot)
 
-**Location:** `app/src/main/java/com/tripath/domain/coach/CoachPlanGenerator.kt`
+**Location:** `app/src/main/java/com/tripath/domain/coach/AutoPlannerGenerator.kt`
 
 Generates training plans for a specified duration using:
 - Phase-aware logic
@@ -128,7 +128,7 @@ Five configurable rules that generate warnings when violated:
 
 **Purpose:** Prevent back-to-back running sessions to reduce injury risk from repetitive impact.
 
-**Configuration:** `runConsecutiveAllowed` (boolean) in `PlanningSettingsScreen`
+**Configuration:** `runConsecutiveAllowed` (boolean) in `AutoPlannerSettingsScreen`
 
 **Logic:**
 - Checks if yesterday was RUN and today is RUN
@@ -207,7 +207,7 @@ The engine infers workout intensity zones from available data:
 
 ## Auto-Pilot Plan Generation
 
-The `CoachPlanGenerator` generates training plans using phase-aware logic and Iron Brain rule validation.
+The `AutoPlannerGenerator` generates training plans using phase-aware logic and Iron Brain rule validation.
 
 ### Generation Process:
 
@@ -319,7 +319,7 @@ User creates plan → CoachViewModel → TrainingRulesEngine.validateDailyPlan()
                                  ↓
                          UI displays alerts
 
-User requests generation → CoachViewModel → CoachPlanGenerator.generateSeason()
+User requests generation → CoachViewModel → AutoPlannerGenerator.generateSeason()
                                          ↓
                                  Validates each placement
                                          ↓
@@ -333,7 +333,7 @@ User requests generation → CoachViewModel → CoachPlanGenerator.generateSeaso
 ## Master Toggle
 
 The entire smart planning system can be enabled/disabled via:
-- `PlanningSettingsScreen` → `smartPlanningEnabled`
+- `AutoPlannerSettingsScreen` → `smartPlanningEnabled`
 - When **disabled**: No validation, no readiness calculation, no warnings
 - When **enabled**: Full validation and readiness assessment active
 
@@ -341,7 +341,7 @@ The entire smart planning system can be enabled/disabled via:
 
 ## Configuration Settings
 
-All rules are configurable via `PlanningSettingsScreen`:
+All rules are configurable via `AutoPlannerSettingsScreen`:
 
 ### 1. Master Control
 - `smartPlanningEnabled`: Enable/disable entire system
@@ -446,4 +446,5 @@ The architecture is well-structured for incremental improvements. The validation
 **Last Updated:** January 2025  
 **Database Version:** 12  
 **Min SDK:** 33 | **Target SDK:** 35
+
 

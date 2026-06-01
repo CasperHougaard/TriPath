@@ -8,7 +8,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.tripath.ui.coach.CoachScreen
-import com.tripath.ui.coach.PlanningSettingsScreen
+import com.tripath.ui.planner.AutoPlannerSettingsScreen
+import com.tripath.ui.planner.RunningGoalEditorScreen
 import com.tripath.ui.dashboard.DashboardScreen
 import com.tripath.ui.planner.WeeklyPlannerScreen
 import com.tripath.ui.progress.ProgressScreen
@@ -24,8 +25,6 @@ sealed class Screen(val route: String) {
     object WeeklyPlanner : Screen("planner")
     object Stats : Screen("stats")
     object Coach : Screen("coach")
-    object Recovery : Screen("recovery")
-    object RecoveryHistory : Screen("recovery_history")
     object Settings : Screen("settings")
     object SyncedExercises : Screen("synced_exercises")
     object ExerciseImportDetail : Screen("exercise_import_detail/{sessionId}") {
@@ -34,7 +33,9 @@ sealed class Screen(val route: String) {
         }
     }
     object ProfileEditor : Screen("profile_editor")
-    object PlanningSettings : Screen("planning_settings")
+    object AutoPlannerSettings : Screen("planner_auto_planner_settings")
+    object LegacyPlanningSettings : Screen("planning_settings")
+    object RunningGoalEditor : Screen("running_goal_editor")
     object Progress : Screen("progress") // Kept for backward compatibility or deep linking
     object WorkoutDetail : Screen("workout_detail/{workoutId}/{isPlanned}") {
         fun createRoute(workoutId: String, isPlanned: Boolean): String {
@@ -71,16 +72,20 @@ fun TriPathNavigation(
         composable(Screen.Coach.route) {
             CoachScreen(navController = navController)
         }
-        composable(Screen.PlanningSettings.route) {
-            PlanningSettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+        composable(Screen.AutoPlannerSettings.route) {
+            AutoPlannerSettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToGoalEditor = { navController.navigate(Screen.RunningGoalEditor.route) }
             )
         }
-        composable(Screen.Recovery.route) {
-            RecoveryScreen(navController = navController)
+        composable(Screen.LegacyPlanningSettings.route) {
+            AutoPlannerSettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToGoalEditor = { navController.navigate(Screen.RunningGoalEditor.route) }
+            )
         }
-        composable(Screen.RecoveryHistory.route) {
-            RecoveryHistoryScreen(navController = navController)
+        composable(Screen.RunningGoalEditor.route) {
+            RunningGoalEditorScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)

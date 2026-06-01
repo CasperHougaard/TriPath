@@ -115,18 +115,7 @@ fun RecoveryScreen(
                             )
                         }
                         
-                        // History button
-                        navController?.let {
-                            IconButton(
-                                onClick = { navController.navigate(Screen.RecoveryHistory.route) }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Timeline,
-                                    contentDescription = "View history",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
+                        // History button removed
                     }
                 }
             )

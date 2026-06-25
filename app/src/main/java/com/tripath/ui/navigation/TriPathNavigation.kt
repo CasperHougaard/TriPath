@@ -10,10 +10,9 @@ import androidx.navigation.navArgument
 import com.tripath.ui.coach.CoachScreen
 import com.tripath.ui.coach.PlanningSettingsScreen
 import com.tripath.ui.dashboard.DashboardScreen
+import com.tripath.ui.health.HealthScreen
 import com.tripath.ui.planner.WeeklyPlannerScreen
 import com.tripath.ui.progress.ProgressScreen
-import com.tripath.ui.recovery.RecoveryHistoryScreen
-import com.tripath.ui.recovery.RecoveryScreen
 import com.tripath.ui.settings.ProfileEditorScreen
 import com.tripath.ui.settings.SettingsScreen
 import com.tripath.ui.stats.StatsScreen
@@ -24,8 +23,7 @@ sealed class Screen(val route: String) {
     object WeeklyPlanner : Screen("planner")
     object Stats : Screen("stats")
     object Coach : Screen("coach")
-    object Recovery : Screen("recovery")
-    object RecoveryHistory : Screen("recovery_history")
+    object Health : Screen("health")
     object Settings : Screen("settings")
     object SyncedExercises : Screen("synced_exercises")
     object ExerciseImportDetail : Screen("exercise_import_detail/{sessionId}") {
@@ -76,11 +74,8 @@ fun TriPathNavigation(
                 onNavigateBack = { navController.popBackStack() }
             )
         }
-        composable(Screen.Recovery.route) {
-            RecoveryScreen(navController = navController)
-        }
-        composable(Screen.RecoveryHistory.route) {
-            RecoveryHistoryScreen(navController = navController)
+        composable(Screen.Health.route) {
+            HealthScreen()
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)

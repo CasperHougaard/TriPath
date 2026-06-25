@@ -6,6 +6,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.tripath.data.local.database.converters.Converters
+import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
@@ -14,6 +15,7 @@ import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
 import com.tripath.data.local.database.dao.WellnessDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
+import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.DailyWellnessLog
@@ -41,9 +43,10 @@ import com.tripath.data.local.database.entities.WorkoutLog
         RawWorkoutData::class,
         SleepLog::class,
         DailyWellnessLog::class,
-        WellnessTaskDefinition::class
+        WellnessTaskDefinition::class,
+        BodyCompositionLog::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -57,6 +60,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun rawWorkoutDataDao(): RawWorkoutDataDao
     abstract fun sleepLogDao(): SleepLogDao
     abstract fun wellnessDao(): WellnessDao
+    abstract fun bodyCompositionDao(): BodyCompositionDao
 
     companion object {
         const val DATABASE_NAME = "tripath_database"

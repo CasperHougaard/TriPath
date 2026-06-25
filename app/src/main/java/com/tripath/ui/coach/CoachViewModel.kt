@@ -8,7 +8,6 @@ import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.preferences.PreferencesManager
-import com.tripath.data.local.repository.RecoveryRepository
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.AnchorType
 import com.tripath.data.model.AllergySeverity
@@ -34,7 +33,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -57,7 +55,6 @@ private data class Data(
 
 private data class ReadinessData(
     val workoutLogs: List<WorkoutLog>,
-    val wellnessLog: DailyWellnessLog?,
     val smartEnabled: Boolean,
     val todayPlans: List<TrainingPlan>,
     val profile: UserProfile?
@@ -80,7 +77,6 @@ data class CoachUiState(
 class CoachViewModel @Inject constructor(
     private val repository: TrainingRepository,
     private val trainingRulesEngine: TrainingRulesEngine,
-    private val recoveryRepository: RecoveryRepository,
     private val preferencesManager: PreferencesManager,
     private val coachPlanGenerator: CoachPlanGenerator
 ) : ViewModel() {
@@ -193,17 +189,15 @@ class CoachViewModel @Inject constructor(
     private fun loadReadinessData() {
         viewModelScope.launch {
             val today = LocalDate.now()
-            
+
             combine(
                 repository.getAllWorkoutLogs(),
-                recoveryRepository.getWellnessLogFlow(today),
                 preferencesManager.smartPlanningEnabledFlow,
                 repository.getTrainingPlansByDateRange(today, today),
                 repository.getUserProfile()
-            ) { workoutLogs: List<WorkoutLog>, wellnessLog: DailyWellnessLog?, smartEnabled: Boolean, todayPlans: List<TrainingPlan>, profile: UserProfile? ->
+            ) { workoutLogs: List<WorkoutLog>, smartEnabled: Boolean, todayPlans: List<TrainingPlan>, profile: UserProfile? ->
                 ReadinessData(
                     workoutLogs = workoutLogs,
-                    wellnessLog = wellnessLog,
                     smartEnabled = smartEnabled,
                     todayPlans = todayPlans,
                     profile = profile
@@ -211,72 +205,56 @@ class CoachViewModel @Inject constructor(
             }.collect { data: ReadinessData ->
                 val today = LocalDate.now()
                 val workoutLogs = data.workoutLogs
-                
-                // Calculate readiness if smart planning is enabled
+
                 if (data.smartEnabled && data.profile != null) {
-                    // Get TSB from current metrics
                     val chartLogs = workoutLogs.filter { !it.date.isAfter(today) }
                     val currentMetrics = TrainingMetricsCalculator.calculatePerformanceMetrics(
                         logs = chartLogs,
                         targetDate = today
                     )
-                    
-                    // Extract wellness data
-                    val wellness = data.wellnessLog ?: DailyWellnessLog(
+
+                    val defaultWellness = DailyWellnessLog(
                         date = today,
                         allergySeverity = AllergySeverity.NONE
                     )
-                    
-                    // Get sleep score from last night's sleep (yesterday's date, since sleep is dated by start time)
-                    // For example: if today is Tuesday, we want Monday night's sleep (dated Monday)
+
                     val lastNightDate = today.minusDays(1)
                     val sleepLog = repository.getSleepLogByDate(lastNightDate)
                     val sleepScore = sleepLog?.sleepScore
                     val tsbInt = currentMetrics.tsb.roundToInt()
-                    
-                    // Calculate readiness
+
                     val readiness = trainingRulesEngine.calculateReadiness(
                         tsb = tsbInt,
                         sleepScore = sleepScore,
-                        soreness = wellness.sorenessIndex,
-                        mood = wellness.moodIndex,
-                        allergy = wellness.allergySeverity ?: AllergySeverity.NONE
+                        soreness = null,
+                        mood = null,
+                        allergy = AllergySeverity.NONE
                     )
                     _readinessState.value = readiness
-                    
-                    // Validate daily plan
+
                     val currentPhase = CoachEngine.calculatePhase(today, data.profile.goalDate)
                     val coachPhase = currentPhase.toCoachPhase()
-                    
-                    // Get yesterday's workout
                     val yesterday = workoutLogs.filter { it.date == today.minusDays(1) }.firstOrNull()
-                    
-                    // Get last strength date
                     val lastStrengthDate = workoutLogs
                         .filter { it.type == WorkoutType.STRENGTH }
                         .maxOfOrNull { it.date }
-                    
-                    // Get recent runs (last 14 days for mechanical load comparison)
                     val fourteenDaysAgo = today.minusDays(14)
                     val recentRuns = workoutLogs.filter { log ->
                         log.type == WorkoutType.RUN &&
                         !log.date.isBefore(fourteenDaysAgo) &&
                         !log.date.isAfter(today)
                     }
-                    
-                    // For todayPlan, pass null as we're validating completed workouts
-                    // (Option A from plan - future enhancement can validate planned workouts)
+
                     val warnings = trainingRulesEngine.validateDailyPlan(
                         yesterday = yesterday,
-                        todayPlan = null, // Pass null as we only validate completed workouts for now
-                        todayWellness = wellness,
+                        todayPlan = null,
+                        todayWellness = defaultWellness,
                         lastStrengthDate = lastStrengthDate,
                         currentPhase = coachPhase,
                         recentRuns = recentRuns
                     )
                     _alertsState.value = warnings
                 } else {
-                    // Smart planning disabled - clear readiness and alerts
                     _readinessState.value = null
                     _alertsState.value = emptyList()
                 }

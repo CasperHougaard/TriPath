@@ -6,20 +6,26 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
+import androidx.health.connect.client.records.BodyFatRecord
+import androidx.health.connect.client.records.BoneMassRecord
 import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseRoute
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.PowerRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.tripath.data.model.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
+import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
+import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.RawWorkoutData
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.preferences.PreferencesManager
@@ -86,6 +92,15 @@ data class SleepSyncResult(
 )
 
 /**
+ * Detailed result from a body composition sync operation.
+ */
+data class BodyCompositionSyncResult(
+    val foundInHealthConnect: Int,
+    val newlyImported: Int,
+    val alreadySynced: Int
+)
+
+/**
  * Data class for sleep stages (for JSON serialization).
  */
 @Serializable
@@ -105,6 +120,7 @@ class HealthConnectManager @Inject constructor(
     private val repository: TrainingRepository,
     private val rawWorkoutDataDao: RawWorkoutDataDao,
     private val sleepLogDao: SleepLogDao,
+    private val bodyCompositionDao: BodyCompositionDao,
     private val preferencesManager: PreferencesManager
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -122,7 +138,7 @@ class HealthConnectManager @Inject constructor(
     }
 
     /**
-     * Required permissions for reading workout and sleep data from Health Connect.
+     * Required permissions for reading workout, sleep, and body composition data from Health Connect.
      */
     val permissions = setOf(
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
@@ -132,7 +148,11 @@ class HealthConnectManager @Inject constructor(
         HealthPermission.getReadPermission(SpeedRecord::class),
         HealthPermission.getReadPermission(PowerRecord::class),
         HealthPermission.getReadPermission(StepsRecord::class),
-        HealthPermission.getReadPermission(SleepSessionRecord::class)
+        HealthPermission.getReadPermission(SleepSessionRecord::class),
+        HealthPermission.getReadPermission(WeightRecord::class),
+        HealthPermission.getReadPermission(BodyFatRecord::class),
+        HealthPermission.getReadPermission(BoneMassRecord::class),
+        HealthPermission.getReadPermission(LeanBodyMassRecord::class)
     )
 
     /**
@@ -1092,6 +1112,95 @@ class HealthConnectManager @Inject constructor(
         return totalScore.coerceIn(1, 100)
     }
     
+    /**
+     * Sync body composition data (weight, body fat, bone mass, lean mass) from Health Connect.
+     * Uses WeightRecord as the anchor — each weight measurement becomes one BodyCompositionLog row,
+     * with the nearest BodyFat/Bone/Lean records within ±2 hours joined to it.
+     */
+    suspend fun syncBodyComposition(daysBack: Int = 365): Result<BodyCompositionSyncResult> = withContext(Dispatchers.IO) {
+        try {
+            if (!isAvailable()) {
+                return@withContext Result.failure(IllegalStateException("Health Connect is not available"))
+            }
+
+            val client = healthConnectClient
+                ?: return@withContext Result.failure(IllegalStateException("Health Connect client unavailable"))
+
+            val endInstant = Instant.now()
+            val startInstant = endInstant.minusSeconds(daysBack.toLong() * 86400)
+            val timeRange = TimeRangeFilter.between(startInstant, endInstant)
+
+            val weights = try {
+                client.readRecords(ReadRecordsRequest(WeightRecord::class, timeRange)).records
+            } catch (e: Exception) { emptyList() }
+
+            val fatRecords = try {
+                client.readRecords(ReadRecordsRequest(BodyFatRecord::class, timeRange)).records
+            } catch (e: Exception) { emptyList() }
+
+            val boneRecords = try {
+                client.readRecords(ReadRecordsRequest(BoneMassRecord::class, timeRange)).records
+            } catch (e: Exception) { emptyList() }
+
+            val leanRecords = try {
+                client.readRecords(ReadRecordsRequest(LeanBodyMassRecord::class, timeRange)).records
+            } catch (e: Exception) { emptyList() }
+
+            val twoHoursMillis = 2 * 60 * 60 * 1000L
+
+            fun <T> List<T>.closestTo(targetMillis: Long, timeOf: (T) -> Long): T? {
+                return minByOrNull { kotlin.math.abs(timeOf(it) - targetMillis) }
+                    ?.takeIf { kotlin.math.abs(timeOf(it) - targetMillis) <= twoHoursMillis }
+            }
+
+            val candidateIds = weights.map { it.metadata.id }
+            val existingIds = if (candidateIds.isNotEmpty()) {
+                bodyCompositionDao.getExistingIds(candidateIds).toSet()
+            } else emptySet()
+
+            val newLogs = mutableListOf<BodyCompositionLog>()
+            var alreadySynced = 0
+
+            for (weight in weights) {
+                val id = weight.metadata.id
+                if (id in existingIds) {
+                    alreadySynced++
+                    continue
+                }
+                val weightMillis = weight.time.toEpochMilli()
+                val fat = fatRecords.closestTo(weightMillis) { it.time.toEpochMilli() }
+                val bone = boneRecords.closestTo(weightMillis) { it.time.toEpochMilli() }
+                val lean = leanRecords.closestTo(weightMillis) { it.time.toEpochMilli() }
+
+                newLogs.add(
+                    BodyCompositionLog(
+                        id = id,
+                        timestamp = weightMillis,
+                        weightKg = weight.weight.inKilograms,
+                        bodyFatPercent = fat?.percentage?.value,
+                        boneMassKg = bone?.mass?.inKilograms,
+                        leanMassKg = lean?.mass?.inKilograms,
+                        importedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+
+            if (newLogs.isNotEmpty()) {
+                bodyCompositionDao.insertAll(newLogs)
+            }
+
+            Result.success(
+                BodyCompositionSyncResult(
+                    foundInHealthConnect = weights.size,
+                    newlyImported = newLogs.size,
+                    alreadySynced = alreadySynced
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     /**
      * Backfill sleep scores for existing sleep logs that don't have scores.
      * This should be called once after migration to calculate scores for historical data.

@@ -1,5 +1,6 @@
 package com.tripath.ui.coach
 
+import com.tripath.domain.running.ProgressionSafety
 import com.tripath.domain.running.RunningGoal
 import com.tripath.domain.running.RunningGoalType
 import java.time.DayOfWeek
@@ -7,13 +8,14 @@ import java.time.LocalDate
 import kotlin.math.roundToInt
 
 data class RunningGoalEditorState(
-    val goalType: RunningGoalType = RunningGoalType.COMPLETE_DISTANCE,
+    val goalType: RunningGoalType = RunningGoalType.ENDURANCE,
     val targetDistanceKm: String = "",
     val targetDate: LocalDate? = null,
     val runsPerWeek: String = "",
     val preferredDays: Set<DayOfWeek> = emptySet(),
     val baselineLongestRunKm: String = "",
-    val baselineWeeklyRunKm: String = ""
+    val baselineWeeklyRunKm: String = "",
+    val progressionSafety: ProgressionSafety = ProgressionSafety.STANDARD
 ) {
     fun isValid(): Boolean {
         val runsPerWeekValue = parsePositiveInt(runsPerWeek)
@@ -36,7 +38,8 @@ data class RunningGoalEditorState(
             runsPerWeek = parsePositiveInt(runsPerWeek),
             preferredDays = preferredDays.toList().sortedBy { it.value },
             baselineLongestRunMeters = parseKilometersToMeters(baselineLongestRunKm),
-            baselineWeeklyRunMeters = parseKilometersToMeters(baselineWeeklyRunKm)
+            baselineWeeklyRunMeters = parseKilometersToMeters(baselineWeeklyRunKm),
+            maxWeeklyProgressPercent = progressionSafety.maxWeeklyProgressPercent
         )
     }
 
@@ -51,7 +54,10 @@ data class RunningGoalEditorState(
                 runsPerWeek = goal.runsPerWeek?.toString().orEmpty(),
                 preferredDays = goal.preferredDays?.toSet().orEmpty(),
                 baselineLongestRunKm = metersToKmString(goal.baselineLongestRunMeters),
-                baselineWeeklyRunKm = metersToKmString(goal.baselineWeeklyRunMeters)
+                baselineWeeklyRunKm = metersToKmString(goal.baselineWeeklyRunMeters),
+                progressionSafety = goal.maxWeeklyProgressPercent?.let { pct ->
+                    ProgressionSafety.entries.minByOrNull { kotlin.math.abs(it.maxWeeklyProgressPercent - pct) }
+                } ?: ProgressionSafety.STANDARD
             )
         }
 

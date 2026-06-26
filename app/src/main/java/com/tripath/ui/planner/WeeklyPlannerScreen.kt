@@ -38,6 +38,7 @@ import androidx.navigation.compose.rememberNavController
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.SpecialPeriodType
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.running.RunPlanDisplayMetrics
 import com.tripath.ui.components.SectionHeader
 import com.tripath.ui.navigation.Screen
 import com.tripath.ui.theme.plannedContentTint
@@ -50,7 +51,13 @@ import java.time.format.DateTimeFormatter
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.vector.ImageVector
+
+enum class DayTotalDisplayMode {
+    TSS,
+    MINUTES
+}
 
 @Composable
 fun WeeklyPlannerScreen(
@@ -60,6 +67,7 @@ fun WeeklyPlannerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var expandedWeeks by remember { mutableStateOf(setOf<Int>()) }
+    var dayTotalDisplayMode by rememberSaveable { mutableStateOf(DayTotalDisplayMode.TSS) }
 
     // Inject CoachViewModel for plan generation
     val coachViewModel: com.tripath.ui.coach.CoachViewModel = androidx.hilt.navigation.compose.hiltViewModel()
@@ -79,7 +87,15 @@ fun WeeklyPlannerScreen(
             ) {
                 SectionHeader(
                     title = "Planner",
-                    subtitle = if (uiState.isMonthView) "Month overview" else "4-week overview"
+                    subtitle = if (uiState.isMonthView) "Month overview" else "4-week overview",
+                    action = {
+                        IconButton(onClick = { navController.navigate(Screen.AutoPlannerSettings.route) }) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Auto-planner settings"
+                            )
+                        }
+                    }
                 )
                 MatrixNavigationHeader(
                     currentMonth = uiState.currentMonth,
@@ -132,6 +148,52 @@ fun WeeklyPlannerScreen(
                         }
                     }
                 }
+
+                // Toggle for day-cell number and heatmap basis
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Number:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { dayTotalDisplayMode = DayTotalDisplayMode.TSS }
+                        ) {
+                            RadioButton(
+                                selected = dayTotalDisplayMode == DayTotalDisplayMode.TSS,
+                                onClick = { dayTotalDisplayMode = DayTotalDisplayMode.TSS }
+                            )
+                            Text(
+                                text = "TSS",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { dayTotalDisplayMode = DayTotalDisplayMode.MINUTES }
+                        ) {
+                            RadioButton(
+                                selected = dayTotalDisplayMode == DayTotalDisplayMode.MINUTES,
+                                onClick = { dayTotalDisplayMode = DayTotalDisplayMode.MINUTES }
+                            )
+                            Text(
+                                text = "Minutes",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(Spacing.sm))
@@ -174,7 +236,9 @@ fun WeeklyPlannerScreen(
                             expandedWeeks = if (isExpanded) expandedWeeks - index else expandedWeeks + index
                         },
                         onCopyWeek = { viewModel.copyWeek(weekRow.weekStart) },
-                        weekNumber = weekRow.weekNumber
+                        weekNumber = weekRow.weekNumber,
+                        thresholdRunPace = uiState.userProfile?.thresholdRunPace,
+                        dayTotalDisplayMode = dayTotalDisplayMode
                     )
                 }
                 if (uiState.disciplineDistribution.isNotEmpty()) {
@@ -187,31 +251,6 @@ fun WeeklyPlannerScreen(
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
-
-                // BOTTOM BUTTONS
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = Spacing.lg),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    Button(
-                        onClick = { coachViewModel.generateSeasonPlan(months = 3) },
-                        enabled = true
-                    ) {
-                        Text("Generate Plan")
-                    }
-                    Button(
-                        onClick = { coachViewModel.generateSeasonPlan(months = 3) },
-                        enabled = uiState.weeklyRows.isNotEmpty(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (uiState.weeklyRows.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (uiState.weeklyRows.isNotEmpty()) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    ) {
-                        Text("Regenerate")
-                    }
-                }
             }
         }
     }
@@ -227,6 +266,8 @@ fun WeeklyRow(
     onToggleExpand: () -> Unit,
     onCopyWeek: () -> Unit,
     weekNumber: Int,
+    thresholdRunPace: Int? = null,
+    dayTotalDisplayMode: DayTotalDisplayMode,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -260,6 +301,8 @@ fun WeeklyRow(
                     includeImported = includeImported,
                     onClick = { onDayClick(day.date) },
                     onWorkoutClick = onWorkoutClick,
+                    thresholdRunPace = thresholdRunPace,
+                    dayTotalDisplayMode = dayTotalDisplayMode,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -310,36 +353,63 @@ fun DayCell(
     includeImported: Boolean,
     onClick: () -> Unit,
     onWorkoutClick: (String, Boolean) -> Unit,
+    thresholdRunPace: Int? = null,
+    dayTotalDisplayMode: DayTotalDisplayMode = DayTotalDisplayMode.TSS,
     modifier: Modifier = Modifier
 ) {
-    // Calculate total TSS for heatmap (planned + imported if toggle is on)
-    val importedLogsForHeatmap = if (includeImported) {
-        day.completedLogs.filter { log ->
-            !day.workouts.any { plan ->
-                plan.date == log.date && plan.type == log.type
-            }
+    // Build day totals with replacement rule:
+    // completed logs replace matching planned entries (same day+type),
+    // unmatched planned remain, unmatched completed are included only when import toggle is on.
+    val remainingLogsByType = day.completedLogs
+        .groupBy { it.type }
+        .mapValues { (_, logs) -> logs.toMutableList() }
+        .toMutableMap()
+
+    var totalTSS = 0
+    var totalMinutes = 0
+
+    day.workouts.forEach { workout ->
+        val matchingLogs = remainingLogsByType[workout.type]
+        val matchingLog = if (!matchingLogs.isNullOrEmpty()) {
+            matchingLogs.removeAt(0)
+        } else {
+            null
         }
-    } else {
-        emptyList()
+
+        if (matchingLog != null) {
+            totalTSS += matchingLog.computedTSS ?: 0
+            totalMinutes += matchingLog.durationMinutes
+        } else {
+            val plannedMetrics = RunPlanDisplayMetrics.fromPlan(workout, thresholdRunPace)
+            totalTSS += plannedMetrics.tss
+            totalMinutes += plannedMetrics.durationMinutes
+        }
     }
-    
-    val totalPlannedTSS = day.workouts.sumOf { it.plannedTSS }
-    val totalImportedTSS = if (includeImported) {
-        importedLogsForHeatmap.sumOf { (it.computedTSS ?: 0) }
-    } else {
-        0
+
+    val unmatchedCompletedLogs = remainingLogsByType.values.flatten()
+    if (includeImported) {
+        totalTSS += unmatchedCompletedLogs.sumOf { it.computedTSS ?: 0 }
+        totalMinutes += unmatchedCompletedLogs.sumOf { it.durationMinutes }
     }
-    val totalTSS = totalPlannedTSS + totalImportedTSS
     
 
     // Use grey-ish for planned activities, sport color for completed
     val plannedGrey = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-    val heatmapColor = when {
-        totalTSS == 0 -> plannedGrey.copy(alpha = 0.3f)
-        totalTSS <= 20 -> plannedGrey.copy(alpha = 0.4f)
-        totalTSS <= 60 -> plannedGrey.copy(alpha = 0.6f)
-        totalTSS <= 100 -> plannedGrey.copy(alpha = 0.8f)
-        else -> plannedGrey
+    val heatmapColor = when (dayTotalDisplayMode) {
+        DayTotalDisplayMode.TSS -> when {
+            totalTSS == 0 -> plannedGrey.copy(alpha = 0.3f)
+            totalTSS <= 20 -> plannedGrey.copy(alpha = 0.4f)
+            totalTSS <= 60 -> plannedGrey.copy(alpha = 0.6f)
+            totalTSS <= 100 -> plannedGrey.copy(alpha = 0.8f)
+            else -> plannedGrey
+        }
+        DayTotalDisplayMode.MINUTES -> when {
+            totalMinutes == 0 -> plannedGrey.copy(alpha = 0.3f)
+            totalMinutes <= 30 -> plannedGrey.copy(alpha = 0.4f)
+            totalMinutes <= 90 -> plannedGrey.copy(alpha = 0.6f)
+            totalMinutes <= 150 -> plannedGrey.copy(alpha = 0.8f)
+            else -> plannedGrey
+        }
     }
 
     val backgroundColor = when {
@@ -393,16 +463,8 @@ fun DayCell(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Get imported logs that don't match a plan (when toggle is enabled)
-                    val importedLogs = if (includeImported) {
-                        day.completedLogs.filter { log ->
-                            !day.workouts.any { plan ->
-                                plan.date == log.date && plan.type == log.type
-                            }
-                        }
-                    } else {
-                        emptyList()
-                    }
+                    // Show unmatched imported logs as extra icons when the toggle is enabled.
+                    val importedLogs = if (includeImported) unmatchedCompletedLogs else emptyList()
                     
                     val hasActivities = day.workouts.isNotEmpty() || importedLogs.isNotEmpty()
                     
@@ -447,7 +509,7 @@ fun DayCell(
                 
                 // BOTTOM: TSS
                 Text(
-                    text = "$totalTSS",
+                    text = if (dayTotalDisplayMode == DayTotalDisplayMode.TSS) "$totalTSS" else "$totalMinutes",
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),

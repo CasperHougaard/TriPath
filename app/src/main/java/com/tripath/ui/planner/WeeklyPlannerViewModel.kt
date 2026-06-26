@@ -2,6 +2,7 @@ package com.tripath.ui.planner
 
 import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.running.RunPlanDisplayMetrics
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.SpecialPeriod
@@ -48,7 +49,8 @@ data class WeeklyPlannerUiState(
     val showBottomSheet: Boolean = false,
     val includeImportedActivities: Boolean = false,
     val isMonthView: Boolean = false,
-    val userProfile: UserProfile? = null
+    val userProfile: UserProfile? = null,
+    val hasActiveRunningGoal: Boolean = false
 )
 
 @HiltViewModel
@@ -73,6 +75,7 @@ class WeeklyPlannerViewModel @Inject constructor(
     init {
         loadMatrixData()
         observeUserProfile()
+        observeActiveRunningGoal()
         loadIncludeImportedPreference()
     }
 
@@ -88,6 +91,14 @@ class WeeklyPlannerViewModel @Inject constructor(
         viewModelScope.launch {
             repository.getUserProfile().collect { profile ->
                 _uiState.value = _uiState.value.copy(userProfile = profile)
+            }
+        }
+    }
+
+    private fun observeActiveRunningGoal() {
+        viewModelScope.launch {
+            preferencesManager.activeRunningGoalFlow.collect { goal ->
+                _uiState.value = _uiState.value.copy(hasActiveRunningGoal = goal != null)
             }
         }
     }
@@ -189,7 +200,8 @@ class WeeklyPlannerViewModel @Inject constructor(
                                 }
                             }
                             
-                            val plannedTSS = weekPlans.sumOf { it.plannedTSS.toLong() }.toInt()
+                            val thresholdPace = _uiState.value.userProfile?.thresholdRunPace
+                            val plannedTSS = weekPlans.sumOf { RunPlanDisplayMetrics.fromPlan(it, thresholdPace).tss.toLong() }.toInt()
                             val actualTSS = filteredWeekLogs.sumOf { (it.computedTSS ?: 0).toLong() }.toInt()
                             val totalDuration = filteredWeekLogs.sumOf { it.durationMinutes.toLong() }.toInt()
                             

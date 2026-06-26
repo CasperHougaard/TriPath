@@ -19,7 +19,7 @@ import com.tripath.domain.PerformanceMetrics
 import com.tripath.domain.TrainingMetricsCalculator
 import com.tripath.domain.TrainingPhase
 import com.tripath.domain.toCoachPhase
-import com.tripath.domain.coach.CoachPlanGenerator
+import com.tripath.domain.coach.AutoPlannerGenerator
 import com.tripath.domain.coach.CoachWarning
 import com.tripath.domain.coach.ReadinessStatus
 import com.tripath.domain.coach.TrainingRulesEngine
@@ -78,7 +78,7 @@ class CoachViewModel @Inject constructor(
     private val repository: TrainingRepository,
     private val trainingRulesEngine: TrainingRulesEngine,
     private val preferencesManager: PreferencesManager,
-    private val coachPlanGenerator: CoachPlanGenerator
+    private val autoPlannerGenerator: AutoPlannerGenerator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CoachUiState())
@@ -101,7 +101,7 @@ class CoachViewModel @Inject constructor(
     private val _generationSuccess = MutableStateFlow<Int?>(null) // Number of plans generated
     val generationSuccess: StateFlow<Int?> = _generationSuccess.asStateFlow()
     
-    val isSmartPlanningEnabled: StateFlow<Boolean> = preferencesManager.smartPlanningEnabledFlow
+    val isSmartPlanningEnabled: StateFlow<Boolean> = preferencesManager.autoPlannerEnabledFlow
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -192,7 +192,7 @@ class CoachViewModel @Inject constructor(
 
             combine(
                 repository.getAllWorkoutLogs(),
-                preferencesManager.smartPlanningEnabledFlow,
+                preferencesManager.autoPlannerEnabledFlow,
                 repository.getTrainingPlansByDateRange(today, today),
                 repository.getUserProfile()
             ) { workoutLogs: List<WorkoutLog>, smartEnabled: Boolean, todayPlans: List<TrainingPlan>, profile: UserProfile? ->
@@ -411,22 +411,6 @@ class CoachViewModel @Inject constructor(
         }
     }
 
-    fun updateDayAnchor(day: DayOfWeek, type: AnchorType) {
-        viewModelScope.launch {
-            val currentProfile = _uiState.value.userProfile
-            val currentSchedule = currentProfile?.weeklySchedule?.toMutableMap() 
-                ?: UserProfile.DEFAULT_WEEKLY_SCHEDULE.toMutableMap()
-            currentSchedule[day] = type
-            
-            val updatedProfile = currentProfile?.copy(weeklySchedule = currentSchedule)
-                ?: UserProfile(weeklySchedule = currentSchedule)
-            
-            withContext(Dispatchers.IO) {
-                repository.upsertUserProfile(updatedProfile)
-            }
-        }
-    }
-
     fun generateSeasonPlan(months: Int = 3, runningGoal: RunningGoal? = null) {
         viewModelScope.launch {
             _isGenerating.value = true
@@ -468,7 +452,7 @@ class CoachViewModel @Inject constructor(
                     repository.deleteAllTrainingPlans()
                     
                     // Generate the plan starting from next Monday
-                    val generationResult = coachPlanGenerator.generateSeason(
+                    val generationResult = autoPlannerGenerator.generateSeason(
                         startDate = planStartDate,
                         currentCtl = currentCtl,
                         months = months,
@@ -478,7 +462,7 @@ class CoachViewModel @Inject constructor(
                     
                     // Handle result
                     when (generationResult) {
-                        is CoachPlanGenerator.GenerationResult.Success -> {
+                        is AutoPlannerGenerator.GenerationResult.Success -> {
                             val generatedPlans = generationResult.plans
                             if (generatedPlans.isNotEmpty()) {
                                 repository.insertTrainingPlans(generatedPlans)
@@ -487,7 +471,7 @@ class CoachViewModel @Inject constructor(
                                 _generationError.value = "Generation completed but produced no plans. Please check your weekly availability and training constraints."
                             }
                         }
-                        is CoachPlanGenerator.GenerationResult.Failure -> {
+                        is AutoPlannerGenerator.GenerationResult.Failure -> {
                             val errorMessage = if (generationResult.details != null) {
                                 "${generationResult.reason}\n\n${generationResult.details}"
                             } else {

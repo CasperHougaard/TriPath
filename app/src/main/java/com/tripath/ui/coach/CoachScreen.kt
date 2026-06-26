@@ -17,7 +17,6 @@ import androidx.compose.material.icons.filled.Healing
 import androidx.compose.material.icons.filled.Hotel
 import androidx.compose.material.icons.filled.LocalHospital
 import androidx.compose.material.icons.filled.Luggage
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -25,7 +24,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -80,19 +78,7 @@ fun CoachScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Coach") },
-                actions = {
-                    navController?.let {
-                        IconButton(
-                            onClick = { it.navigate(com.tripath.ui.navigation.Screen.PlanningSettings.route) }
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Coach Settings"
-                            )
-                        }
-                    }
-                }
+                title = { Text("Coach") }
             )
         },
         modifier = modifier

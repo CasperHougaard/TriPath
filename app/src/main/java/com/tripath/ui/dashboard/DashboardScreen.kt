@@ -85,6 +85,7 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.running.RunPlanDisplayMetrics
 import com.tripath.ui.dashboard.components.WeeklyActivityMatrix
 import com.tripath.ui.dashboard.components.WeeklyCalendarStrip
 import com.tripath.ui.model.FormStatus
@@ -503,6 +504,7 @@ fun DayDetailCard(
     restDayMessage: String,
     isWorkoutCompleted: Boolean,
     onWorkoutClick: (String, Boolean) -> Unit,
+    thresholdRunPace: Int? = null,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -518,7 +520,7 @@ fun DayDetailCard(
         if (isRestDay) {
             RestDayContent(message = restDayMessage)
         } else if (plan != null) {
-            WorkoutPlanContent(plan = plan, isCompleted = isWorkoutCompleted)
+            WorkoutPlanContent(plan = plan, isCompleted = isWorkoutCompleted, thresholdRunPace = thresholdRunPace)
         }
     }
 }
@@ -561,14 +563,17 @@ private fun RestDayContent(message: String) {
 }
 
 @Composable
-private fun WorkoutPlanContent(plan: TrainingPlan, isCompleted: Boolean) {
+private fun WorkoutPlanContent(plan: TrainingPlan, isCompleted: Boolean, thresholdRunPace: Int? = null) {
     val color = plan.type.toColor()
+    val displayMetrics = remember(plan, thresholdRunPace) {
+        RunPlanDisplayMetrics.fromPlan(plan, thresholdRunPace)
+    }
     val summaryText = buildList {
-        plan.plannedDistanceMeters?.let {
+        displayMetrics.distanceMeters?.let {
             add("${"%.1f".format(it / 1000.0)} km est")
         }
-        add("${plan.durationMinutes} min")
-        add("${plan.plannedTSS} TSS")
+        add("${displayMetrics.durationMinutes} min")
+        add("${displayMetrics.tss} TSS")
     }.joinToString(" • ")
     
     Column(

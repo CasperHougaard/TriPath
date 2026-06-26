@@ -37,7 +37,8 @@ object RunningGoalPreferencesCodec {
         val runsPerWeek: Int? = null,
         val preferredDays: List<String>? = null,
         val baselineLongestRunMeters: Int? = null,
-        val baselineWeeklyRunMeters: Int? = null
+        val baselineWeeklyRunMeters: Int? = null,
+        val maxWeeklyProgressPercent: Float? = null
     )
 
     private fun RunningGoal.toPersisted(): PersistedRunningGoal {
@@ -48,7 +49,8 @@ object RunningGoalPreferencesCodec {
             runsPerWeek = runsPerWeek,
             preferredDays = preferredDays?.map { it.name },
             baselineLongestRunMeters = baselineLongestRunMeters,
-            baselineWeeklyRunMeters = baselineWeeklyRunMeters
+            baselineWeeklyRunMeters = baselineWeeklyRunMeters,
+            maxWeeklyProgressPercent = maxWeeklyProgressPercent
         )
     }
 
@@ -60,7 +62,8 @@ object RunningGoalPreferencesCodec {
             runsPerWeek = runsPerWeek,
             preferredDays = preferredDays?.map(DayOfWeek::valueOf),
             baselineLongestRunMeters = baselineLongestRunMeters,
-            baselineWeeklyRunMeters = baselineWeeklyRunMeters
+            baselineWeeklyRunMeters = baselineWeeklyRunMeters,
+            maxWeeklyProgressPercent = maxWeeklyProgressPercent
         )
     }
 }

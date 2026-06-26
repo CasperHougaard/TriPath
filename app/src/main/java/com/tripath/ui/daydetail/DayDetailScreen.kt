@@ -31,6 +31,7 @@ import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.running.RunPlanDisplayMetrics
 import com.tripath.ui.navigation.Screen
 import com.tripath.ui.planner.AddWorkoutBottomSheet
 import com.tripath.ui.theme.plannedContentTint
@@ -192,6 +193,7 @@ fun DayDetailScreen(
 
                         PlannedActivityCard(
                             activity = activity,
+                            thresholdRunPace = uiState.userProfile?.thresholdRunPace,
                             missedRunAssistantState = missedRunAssistantState,
                             onClick = {
                                 navController.navigate(Screen.WorkoutDetail.createRoute(activity.id, true))
@@ -278,8 +280,8 @@ fun DayDetailScreen(
 
     customMoveActivity?.let { activity ->
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = missedRunTomorrowDate()
-                .atStartOfDay(java.time.ZoneId.systemDefault())
+            initialSelectedDateMillis = activity.date
+                .atStartOfDay(java.time.ZoneId.of("UTC"))
                 .toInstant()
                 .toEpochMilli()
         )
@@ -459,6 +461,7 @@ fun TemplateManagementDialog(
 @Composable
 fun PlannedActivityCard(
     activity: TrainingPlan,
+    thresholdRunPace: Int? = null,
     missedRunAssistantState: MissedRunAssistantState,
     onClick: () -> Unit,
     onEdit: () -> Unit,
@@ -467,6 +470,9 @@ fun PlannedActivityCard(
     onMoveToCustomDate: () -> Unit,
     onDropMissedRun: () -> Unit
 ) {
+    val displayMetrics = remember(activity, thresholdRunPace) {
+        RunPlanDisplayMetrics.fromPlan(activity, thresholdRunPace)
+    }
     val plannedGrey = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
     val plannedTint = activity.plannedContentTint(MaterialTheme.colorScheme.onSurface)
     Card(
@@ -515,7 +521,7 @@ fun PlannedActivityCard(
                         horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
                     ) {
                         Text(
-                            text = "${activity.durationMinutes} min",
+                            text = "${displayMetrics.durationMinutes} min",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
@@ -525,7 +531,7 @@ fun PlannedActivityCard(
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
                         Text(
-                            text = "${activity.plannedTSS} TSS",
+                            text = "${displayMetrics.tss} TSS",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Bold,
                             color = plannedTint
@@ -542,6 +548,14 @@ fun PlannedActivityCard(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit",
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    )
+                }
+
+                IconButton(onClick = onMoveToCustomDate) {
+                    Icon(
+                        imageVector = Icons.Default.SwapHoriz,
+                        contentDescription = "Change date",
+                        tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)
                     )
                 }
 

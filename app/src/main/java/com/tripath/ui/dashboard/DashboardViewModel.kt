@@ -94,7 +94,8 @@ data class DashboardUiState(
     val atl: Double = 0.0,  // Acute Training Load (Fatigue)
     val tsb: Double = 0.0,  // Training Stress Balance (Form)
     val formStatus: FormStatus = FormStatus.OPTIMAL,
-    val weeklyAllowedTSS: Int = 0
+    val weeklyAllowedTSS: Int = 0,
+    val thresholdRunPace: Int? = null
 )
 
 private val dashboardWorkoutOrder = listOf(
@@ -124,6 +125,7 @@ class DashboardViewModel @Inject constructor(
         checkPermissionsAndSync()
         loadDashboardData()
         loadPerformanceMetrics()
+        loadThresholdRunPace()
         updateGreeting()
     }
 
@@ -148,6 +150,13 @@ class DashboardViewModel @Inject constructor(
             else -> "Good Night"
         }
         _uiState.value = _uiState.value.copy(greeting = greeting)
+    }
+
+    private fun loadThresholdRunPace() {
+        viewModelScope.launch {
+            val profile = repository.getUserProfileOnce()
+            _uiState.value = _uiState.value.copy(thresholdRunPace = profile?.thresholdRunPace)
+        }
     }
 
     /**

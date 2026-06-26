@@ -72,15 +72,7 @@ fun StatsScreen(
                 // Header & Period Selector
                 SectionHeader(
                     title = "Training Statistics",
-                    subtitle = "Analyze your performance",
-                    action = {
-                        IconButton(onClick = { showVolumeGoalDialog = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Volume goal settings"
-                            )
-                        }
-                    }
+                    subtitle = "Analyze your performance"
                 )
 
                 PeriodSelector(
@@ -107,15 +99,17 @@ fun StatsScreen(
                     title = "Volume Goal",
                     subtitle = "Track year, month, and week pacing",
                     action = {
-                        uiState.annualVolumeGoalHours?.let {
-                            Text("${formatHours(it.toDouble())}h target")
+                        val targetText = uiState.annualVolumeGoalHours?.let {
+                            "${formatHours(it.toDouble())}h target"
+                        } ?: "Set target"
+                        TextButton(onClick = { showVolumeGoalDialog = true }) {
+                            Text(targetText)
                         }
                     }
                 )
                 VolumeGoalTrackerCard(
                     annualGoalHours = uiState.annualVolumeGoalHours,
-                    progress = uiState.volumeGoalProgress,
-                    onConfigureClick = { showVolumeGoalDialog = true }
+                    progress = uiState.volumeGoalProgress
                 )
 
                 // 2. Training Load (TSS)

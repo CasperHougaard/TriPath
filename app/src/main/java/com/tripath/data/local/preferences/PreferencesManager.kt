@@ -10,7 +10,6 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
-import com.tripath.data.model.AnchorType
 import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
@@ -61,16 +60,13 @@ class PreferencesManager @Inject constructor(
         private val LONG_TRAINING_DAY_KEY = stringPreferencesKey("long_training_day")
         private val STRENGTH_DAYS_KEY = intPreferencesKey("strength_days")
         private val TRAINING_BALANCE_KEY = stringPreferencesKey("training_balance")
-        private val WEEKLY_SCHEDULE_KEY = stringPreferencesKey("weekly_schedule")
         private val ACTIVE_RUNNING_GOAL_KEY = stringPreferencesKey("active_running_goal")
         
-        // Coach Planning Settings keys
-        private val IS_SMART_PLANNING_ENABLED_KEY = booleanPreferencesKey("is_smart_planning_enabled")
-        private val RUN_CONSECUTIVE_ALLOWED_KEY = booleanPreferencesKey("run_consecutive_allowed")
-        private val STRENGTH_SPACING_HOURS_KEY = intPreferencesKey("strength_spacing_hours")
-        private val RAMP_RATE_LIMIT_KEY = floatPreferencesKey("ramp_rate_limit")
-        private val MECHANICAL_LOAD_MONITORING_KEY = booleanPreferencesKey("mechanical_load_monitoring")
-        private val ALLOW_COMMUTE_EXEMPTION_KEY = booleanPreferencesKey("allow_commute_exemption")
+        // Planner Auto-planner Settings keys
+        private val AUTO_PLANNER_ENABLED_KEY = booleanPreferencesKey("planner_auto_planner_enabled")
+
+        // Legacy coach planning keys kept for migration from previous versions
+        private val LEGACY_IS_SMART_PLANNING_ENABLED_KEY = booleanPreferencesKey("is_smart_planning_enabled")
         
         /** Default sync period in days */
         const val DEFAULT_SYNC_DAYS = 30
@@ -175,15 +171,13 @@ class PreferencesManager @Inject constructor(
         val longTrainingDayName = preferences[LONG_TRAINING_DAY_KEY]
         val strengthDays = preferences[STRENGTH_DAYS_KEY]
         val trainingBalanceJson = preferences[TRAINING_BALANCE_KEY]
-        val weeklyScheduleJson = preferences[WEEKLY_SCHEDULE_KEY]
 
         // If no fields are set, return null
         if (ftpBike == null && maxHeartRate == null && defaultSwimTSS == null &&
             defaultStrengthHeavyTSS == null && defaultStrengthLightTSS == null &&
             goalDateEpochDay == null && weeklyHoursGoal == null && annualVolumeGoalHours == null && lthr == null &&
             cssSecondsper100m == null && thresholdRunPace == null && weeklyAvailabilityJson == null &&
-            longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null &&
-            weeklyScheduleJson == null
+            longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null
         ) {
             return null
         }
@@ -215,17 +209,6 @@ class PreferencesManager @Inject constructor(
             }
         } ?: DayOfWeek.SUNDAY
 
-        val weeklySchedule = weeklyScheduleJson?.let { json ->
-            try {
-                val map = Json.decodeFromString<Map<String, String>>(json)
-                map.entries.associate { (day, anchorType) ->
-                    DayOfWeek.valueOf(day) to AnchorType.valueOf(anchorType)
-                }
-            } catch (e: Exception) {
-                null
-            }
-        }
-
         return UserProfile(
             ftpBike = ftpBike,
             maxHeartRate = maxHeartRate,
@@ -241,8 +224,7 @@ class PreferencesManager @Inject constructor(
             weeklyAvailability = weeklyAvailability,
             longTrainingDay = longTrainingDay,
             strengthDays = strengthDays ?: 2,
-            trainingBalance = trainingBalance,
-            weeklySchedule = weeklySchedule
+            trainingBalance = trainingBalance
         )
     }
 
@@ -291,13 +273,6 @@ class PreferencesManager @Inject constructor(
             profile.trainingBalance?.let { balance ->
                 preferences[TRAINING_BALANCE_KEY] = Json.encodeToString(balance)
             } ?: preferences.remove(TRAINING_BALANCE_KEY)
-
-            profile.weeklySchedule?.let { map ->
-                val stringMap = map.entries.associate { (day, anchorType) ->
-                    day.name to anchorType.name
-                }
-                preferences[WEEKLY_SCHEDULE_KEY] = Json.encodeToString(stringMap)
-            } ?: preferences.remove(WEEKLY_SCHEDULE_KEY)
         }
     }
 
@@ -321,7 +296,6 @@ class PreferencesManager @Inject constructor(
             preferences.remove(LONG_TRAINING_DAY_KEY)
             preferences.remove(STRENGTH_DAYS_KEY)
             preferences.remove(TRAINING_BALANCE_KEY)
-            preferences.remove(WEEKLY_SCHEDULE_KEY)
         }
     }
 
@@ -361,115 +335,24 @@ class PreferencesManager @Inject constructor(
         }
     }
 
-    // ==================== Coach Planning Settings Operations ====================
+    // ==================== Planner Auto-planner Settings Operations ====================
 
-    /**
-     * Flow that emits the current smart planning enabled preference.
-     * Default is true (smart planning enabled).
-     */
-    val smartPlanningEnabledFlow: Flow<Boolean> = dataStore.data.map { preferences ->
-        preferences[IS_SMART_PLANNING_ENABLED_KEY] ?: true // Default to enabled
+    val autoPlannerEnabledFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[AUTO_PLANNER_ENABLED_KEY]
+            ?: preferences[LEGACY_IS_SMART_PLANNING_ENABLED_KEY]
+            ?: true
     }
 
-    /**
-     * Set the smart planning enabled preference.
-     * @param enabled true to enable smart planning, false to disable
-     */
-    suspend fun setSmartPlanningEnabled(enabled: Boolean) {
+    suspend fun setAutoPlannerEnabled(enabled: Boolean) {
         dataStore.edit { preferences ->
-            preferences[IS_SMART_PLANNING_ENABLED_KEY] = enabled
+            preferences[AUTO_PLANNER_ENABLED_KEY] = enabled
+            preferences.remove(LEGACY_IS_SMART_PLANNING_ENABLED_KEY)
         }
     }
 
-    /**
-     * Flow that emits the current run consecutive allowed preference.
-     * Default is false (consecutive runs not allowed).
-     */
-    val runConsecutiveAllowedFlow: Flow<Boolean> = dataStore.data.map { preferences ->
-        preferences[RUN_CONSECUTIVE_ALLOWED_KEY] ?: false // Default to not allowed
-    }
-
-    /**
-     * Set the run consecutive allowed preference.
-     * @param allowed true to allow consecutive runs, false to block them
-     */
-    suspend fun setRunConsecutiveAllowed(allowed: Boolean) {
-        dataStore.edit { preferences ->
-            preferences[RUN_CONSECUTIVE_ALLOWED_KEY] = allowed
-        }
-    }
-
-    /**
-     * Flow that emits the current strength spacing hours preference.
-     * Default is 48 hours.
-     */
-    val strengthSpacingHoursFlow: Flow<Int> = dataStore.data.map { preferences ->
-        preferences[STRENGTH_SPACING_HOURS_KEY] ?: 48 // Default to 48 hours
-    }
-
-    /**
-     * Set the strength spacing hours preference.
-     * @param hours Minimum hours between strength sessions
-     */
-    suspend fun setStrengthSpacingHours(hours: Int) {
-        dataStore.edit { preferences ->
-            preferences[STRENGTH_SPACING_HOURS_KEY] = hours
-        }
-    }
-
-    /**
-     * Flow that emits the current ramp rate limit preference.
-     * Default is 5.0% (5.0f).
-     */
-    val rampRateLimitFlow: Flow<Float> = dataStore.data.map { preferences ->
-        preferences[RAMP_RATE_LIMIT_KEY] ?: 5.0f // Default to 5%
-    }
-
-    /**
-     * Set the ramp rate limit preference.
-     * @param limit Maximum weekly TSS increase percentage
-     */
-    suspend fun setRampRateLimit(limit: Float) {
-        dataStore.edit { preferences ->
-            preferences[RAMP_RATE_LIMIT_KEY] = limit
-        }
-    }
-
-    /**
-     * Flow that emits the current mechanical load monitoring preference.
-     * Default is true (monitoring enabled).
-     */
-    val mechanicalLoadMonitoringFlow: Flow<Boolean> = dataStore.data.map { preferences ->
-        preferences[MECHANICAL_LOAD_MONITORING_KEY] ?: true // Default to enabled
-    }
-
-    /**
-     * Set the mechanical load monitoring preference.
-     * @param enabled true to enable mechanical load monitoring, false to disable
-     */
-    suspend fun setMechanicalLoadMonitoring(enabled: Boolean) {
-        dataStore.edit { preferences ->
-            preferences[MECHANICAL_LOAD_MONITORING_KEY] = enabled
-        }
-    }
-
-    /**
-     * Flow that emits the current allow commute exemption preference.
-     * Default is true (commute exemption allowed).
-     */
-    val allowCommuteExemptionFlow: Flow<Boolean> = dataStore.data.map { preferences ->
-        preferences[ALLOW_COMMUTE_EXEMPTION_KEY] ?: true // Default to allowed
-    }
-
-    /**
-     * Set the allow commute exemption preference.
-     * @param allowed true to allow commute exemption, false to block it
-     */
-    suspend fun setAllowCommuteExemption(allowed: Boolean) {
-        dataStore.edit { preferences ->
-            preferences[ALLOW_COMMUTE_EXEMPTION_KEY] = allowed
-        }
-    }
+    // Legacy aliases retained to avoid breaking existing callers during refactor rollout.
+    val smartPlanningEnabledFlow: Flow<Boolean> = autoPlannerEnabledFlow
+    suspend fun setSmartPlanningEnabled(enabled: Boolean) = setAutoPlannerEnabled(enabled)
     
     /**
      * Check if sleep score backfill has been completed.

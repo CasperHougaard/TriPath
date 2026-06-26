@@ -1,3 +1,4 @@
+// This file has been removed as part of the project cleanup.
 package com.tripath.data.model
 
 /**

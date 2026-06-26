@@ -15,5 +15,7 @@ data class RunningGoal(
     val preferredDays: List<DayOfWeek>? = null, // Optional, for scheduling
     // Baseline fields (included directly)
     val baselineLongestRunMeters: Int? = null,  // User's current longest run
-    val baselineWeeklyRunMeters: Int? = null    // User's current weekly run volume
+    val baselineWeeklyRunMeters: Int? = null,   // User's current weekly run volume
+    // Progression safety (null = engine default 15%)
+    val maxWeeklyProgressPercent: Float? = null
 )

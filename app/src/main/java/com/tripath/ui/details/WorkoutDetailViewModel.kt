@@ -79,6 +79,21 @@ class WorkoutDetailViewModel @Inject constructor(
     }
 
     /**
+     * Save edits to a planned workout's details (type, duration, TSS, etc.).
+     */
+    fun updatePlan(updatedPlan: TrainingPlan, onDone: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                repository.updateTrainingPlan(updatedPlan)
+                _uiState.value = _uiState.value.copy(trainingPlan = updatedPlan)
+                onDone()
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = "Failed to update workout: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Load workout data based on ID and type
      */
     fun loadWorkout(workoutId: String, isPlanned: Boolean) {

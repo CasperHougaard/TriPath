@@ -51,26 +51,6 @@ data class UserProfile(
     val strengthDays: Int? = 2,
 
     /** Desired distribution of TSS across disciplines */
-    val trainingBalance: TrainingBalance? = TrainingBalance.IRONMAN_BASE,
-    
-    /** Weekly schedule anchors: Map of DayOfWeek to AnchorType */
-    val weeklySchedule: Map<DayOfWeek, AnchorType>? = null
-) {
-    companion object {
-        /**
-         * Default weekly schedule template.
-         * Monday: Rest, Tuesday: Strength, Wednesday: Rest, Thursday: Strength,
-         * Friday: Rest, Saturday: Bike, Sunday: Long Run
-         */
-        val DEFAULT_WEEKLY_SCHEDULE = mapOf(
-            DayOfWeek.MONDAY to AnchorType.NONE,
-            DayOfWeek.TUESDAY to AnchorType.STRENGTH,
-            DayOfWeek.WEDNESDAY to AnchorType.NONE,
-            DayOfWeek.THURSDAY to AnchorType.STRENGTH,
-            DayOfWeek.FRIDAY to AnchorType.NONE,
-            DayOfWeek.SATURDAY to AnchorType.BIKE,
-            DayOfWeek.SUNDAY to AnchorType.LONG_RUN
-        )
-    }
-}
+    val trainingBalance: TrainingBalance? = TrainingBalance.IRONMAN_BASE
+)
 

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Pool
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -64,6 +65,7 @@ import com.tripath.data.model.WorkoutType
 import com.tripath.data.model.RoutePoint
 import com.tripath.domain.IntensityCalculator
 import com.tripath.domain.IntensityTagColor
+import com.tripath.domain.running.RunPlanDisplayMetrics
 import com.tripath.domain.running.RunStepDurationType
 import com.tripath.domain.running.RunWorkoutStep
 import com.tripath.domain.running.StructuredRunWorkout
@@ -71,8 +73,8 @@ import com.tripath.domain.running.StructuredRunWorkoutBuilder
 import com.tripath.domain.running.runningSessionTypeFromPlanSubType
 import com.tripath.ui.components.IntensityTag
 import com.tripath.ui.components.RouteViewer
-import com.tripath.ui.components.SmartAdviceCard
 import com.tripath.ui.components.charts.ZoneDistributionChart
+import com.tripath.ui.planner.AddWorkoutBottomSheet
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.toColor
 import java.time.format.DateTimeFormatter
@@ -89,6 +91,7 @@ fun WorkoutDetailScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoveDialog by remember { mutableStateOf(false) }
+    var showEditSheet by remember { mutableStateOf(false) }
 
     // Load workout data
     LaunchedEffect(workoutId, isPlanned) {
@@ -107,8 +110,11 @@ fun WorkoutDetailScreen(
                 actions = {
                     // Edit action only for planned workouts
                     if (isPlanned) {
+                        IconButton(onClick = { showEditSheet = true }) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit workout")
+                        }
                         IconButton(onClick = { showMoveDialog = true }) {
-                            Icon(Icons.Default.Edit, contentDescription = "Reschedule")
+                            Icon(Icons.Default.SwapHoriz, contentDescription = "Change date")
                         }
                     }
                     // Delete action for both
@@ -160,6 +166,21 @@ fun WorkoutDetailScreen(
         }
     }
 
+    // Edit sheet for planned workouts
+    if (showEditSheet && isPlanned && uiState.trainingPlan != null) {
+        AddWorkoutBottomSheet(
+            selectedDate = uiState.trainingPlan!!.date,
+            initialWorkout = uiState.trainingPlan,
+            userProfile = uiState.userProfile,
+            onDismiss = { showEditSheet = false },
+            onSave = { updated ->
+                viewModel.updatePlan(updated.copy(id = uiState.trainingPlan!!.id)) {
+                    showEditSheet = false
+                }
+            }
+        )
+    }
+
     // Delete confirmation dialog
     if (showDeleteDialog) {
         AlertDialog(
@@ -191,7 +212,7 @@ fun WorkoutDetailScreen(
         uiState.trainingPlan?.let { trainingPlan ->
             val datePickerState = androidx.compose.material3.rememberDatePickerState(
                 initialSelectedDateMillis = trainingPlan.date
-                    .atStartOfDay(java.time.ZoneId.systemDefault())
+                    .atStartOfDay(java.time.ZoneId.of("UTC"))
                     .toInstant()
                     .toEpochMilli()
             )
@@ -237,12 +258,6 @@ private fun PlannedWorkoutContent(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val advice = IntensityCalculator.getAdvice(
-        workoutType = plan.type,
-        tss = plan.plannedTSS,
-        durationMinutes = plan.durationMinutes,
-        userProfile = uiState.userProfile
-    )
     val structuredRunWorkout = remember(
         plan.type,
         plan.subType,
@@ -257,6 +272,20 @@ private fun PlannedWorkoutContent(
             totalWeeks = uiState.structuredRunTotalWeeks ?: 1
         )
     }
+    
+    // Derive metrics from structured workout when available (run planner is source of truth)
+    val derivedMetrics = remember(structuredRunWorkout) {
+        structuredRunWorkout?.let { RunPlanDisplayMetrics.fromStructuredWorkout(it) }
+    }
+    val displayTSS = derivedMetrics?.tss ?: plan.plannedTSS
+    val displayDuration = derivedMetrics?.durationMinutes ?: plan.durationMinutes
+    
+    val advice = IntensityCalculator.getAdvice(
+        workoutType = plan.type,
+        tss = displayTSS,
+        durationMinutes = displayDuration,
+        userProfile = uiState.userProfile
+    )
 
     Column(
         modifier = modifier
@@ -269,16 +298,13 @@ private fun PlannedWorkoutContent(
         WorkoutHeader(
             workoutType = plan.type,
             date = plan.date.format(DateTimeFormatter.ofPattern("EEEE, MMM d, yyyy")),
-            tss = plan.plannedTSS,
+            tss = displayTSS,
             intensityLabel = advice.zoneLabel,
             tagColor = advice.tagColor
         )
 
-        // Smart Advice Section
-        SmartAdviceCard(advice = advice.advice, warning = advice.warning)
-
         // Metrics Grid
-        PlannedMetricsGrid(plan = plan)
+        PlannedMetricsGrid(plan = plan, structuredRunWorkout = structuredRunWorkout)
 
         structuredRunWorkout?.let { workout ->
             StructuredRunWorkoutSection(workout = workout)
@@ -515,8 +541,18 @@ private fun WorkoutHeader(
 @Composable
 private fun PlannedMetricsGrid(
     plan: TrainingPlan,
+    structuredRunWorkout: StructuredRunWorkout? = null,
     modifier: Modifier = Modifier
 ) {
+    // When a structured run workout is available with pace data, derive metrics from it
+    val derivedMetrics = remember(structuredRunWorkout) {
+        structuredRunWorkout?.let { RunPlanDisplayMetrics.fromStructuredWorkout(it) }
+    }
+    
+    val displayDuration = derivedMetrics?.durationMinutes ?: plan.durationMinutes
+    val displayDistanceMeters = derivedMetrics?.distanceMeters ?: plan.plannedDistanceMeters
+    val displayTSS = derivedMetrics?.tss ?: plan.plannedTSS
+    
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -537,10 +573,10 @@ private fun PlannedMetricsGrid(
             
             MetricRow(
                 label = "Duration",
-                value = "${plan.durationMinutes} min"
+                value = "$displayDuration min"
             )
 
-            plan.plannedDistanceMeters?.let { distanceMeters ->
+            displayDistanceMeters?.let { distanceMeters ->
                 MetricRow(
                     label = "Planned Distance",
                     value = formatDistance(distanceMeters.toDouble(), plan.type)
@@ -549,7 +585,7 @@ private fun PlannedMetricsGrid(
             
             MetricRow(
                 label = "Planned TSS",
-                value = "${plan.plannedTSS}"
+                value = "$displayTSS"
             )
         }
     }

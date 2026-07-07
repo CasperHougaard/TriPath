@@ -163,6 +163,88 @@ class RunGoalTrainingPlanMapperTest {
         assertEquals(null, result)
     }
 
+    @Test
+    fun `runs avoid strength days and prefer the day before them`() {
+        val result = RunGoalTrainingPlanMapper.mapToTrainingPlans(
+            goal = RunningGoal(type = RunningGoalType.COMPLETE_DISTANCE),
+            progressionResult = progressionResult(listOf(4000, 5000, 8000)),
+            preferredRunningDays = emptyList(),
+            planStartDate = LocalDate.of(2026, 5, 18),
+            // Strength on Tue 5/19 and Fri 5/22 within the first week.
+            strengthDates = listOf(LocalDate.of(2026, 5, 19), LocalDate.of(2026, 5, 22))
+        )
+
+        val runDays = result.map { it.date.dayOfWeek }
+        // Never on a strength weekday.
+        assertFalse(runDays.contains(DayOfWeek.TUESDAY))
+        assertFalse(runDays.contains(DayOfWeek.FRIDAY))
+        // Prefers the day before each strength day: Monday (before Tue) and Thursday (before Fri).
+        assertTrue(runDays.contains(DayOfWeek.MONDAY))
+        assertTrue(runDays.contains(DayOfWeek.THURSDAY))
+        // The third run avoids a Sunday->Monday wrap (treated as consecutive), so it lands on Saturday.
+        assertEquals(
+            listOf(DayOfWeek.MONDAY, DayOfWeek.THURSDAY, DayOfWeek.SATURDAY),
+            runDays
+        )
+    }
+
+    @Test
+    fun `empty strength dates keep the default placement`() {
+        val result = RunGoalTrainingPlanMapper.mapToTrainingPlans(
+            goal = RunningGoal(type = RunningGoalType.COMPLETE_DISTANCE),
+            progressionResult = progressionResult(listOf(4000, 5000, 8000)),
+            preferredRunningDays = emptyList(),
+            planStartDate = LocalDate.of(2026, 5, 18),
+            strengthDates = emptyList()
+        )
+
+        assertEquals(
+            listOf(DayOfWeek.TUESDAY, DayOfWeek.THURSDAY, DayOfWeek.SUNDAY),
+            result.map { it.date.dayOfWeek }
+        )
+    }
+
+    @Test
+    fun `mid-week start prepends a non-counting lead-in week mirroring week 1`() {
+        // Plan's first counting week is Monday 5/18; the athlete starts Thursday 5/14.
+        val result = RunGoalTrainingPlanMapper.mapToTrainingPlans(
+            goal = RunningGoal(type = RunningGoalType.COMPLETE_DISTANCE),
+            progressionResult = progressionResult(listOf(4000, 5000, 8000)),
+            preferredRunningDays = emptyList(),
+            planStartDate = LocalDate.of(2026, 5, 18),
+            earliestRunDate = LocalDate.of(2026, 5, 14)
+        )
+
+        // Week 1 pattern is Tue/Thu/Sun. The lead-in fills only the remaining days on/after 5/14
+        // (Thu 5/14, Sun 5/17); the counting week keeps its full Tue/Thu/Sun placement.
+        assertEquals(
+            listOf(
+                LocalDate.of(2026, 5, 14),
+                LocalDate.of(2026, 5, 17),
+                LocalDate.of(2026, 5, 19),
+                LocalDate.of(2026, 5, 21),
+                LocalDate.of(2026, 5, 24)
+            ),
+            result.map { it.date }
+        )
+        // Nothing lands before the athlete's start day.
+        assertTrue(result.none { it.date.isBefore(LocalDate.of(2026, 5, 14)) })
+    }
+
+    @Test
+    fun `start on the counting week Monday adds no lead-in`() {
+        val result = RunGoalTrainingPlanMapper.mapToTrainingPlans(
+            goal = RunningGoal(type = RunningGoalType.COMPLETE_DISTANCE),
+            progressionResult = progressionResult(listOf(4000, 5000, 8000)),
+            preferredRunningDays = emptyList(),
+            planStartDate = LocalDate.of(2026, 5, 18),
+            earliestRunDate = LocalDate.of(2026, 5, 18)
+        )
+
+        assertEquals(3, result.size)
+        assertTrue(result.none { it.date.isBefore(LocalDate.of(2026, 5, 18)) })
+    }
+
     private fun progressionResult(
         sessionDistancesMeters: List<Int>,
         sessionTypes: List<RunningSessionType> = emptyList()

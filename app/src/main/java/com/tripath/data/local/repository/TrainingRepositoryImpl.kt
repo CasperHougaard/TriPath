@@ -51,6 +51,9 @@ class TrainingRepositoryImpl @Inject constructor(
     override fun getTrainingPlansByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<TrainingPlan>> =
         trainingPlanDao.getByDateRange(startDate.toEpochDay(), endDate.toEpochDay())
 
+    override suspend fun getTrainingPlansByDateRangeOnce(startDate: LocalDate, endDate: LocalDate): List<TrainingPlan> =
+        trainingPlanDao.getByDateRangeOnce(startDate.toEpochDay(), endDate.toEpochDay())
+
     override fun getTrainingPlansByType(type: WorkoutType): Flow<List<TrainingPlan>> =
         trainingPlanDao.getByType(type)
 
@@ -98,8 +101,19 @@ class TrainingRepositoryImpl @Inject constructor(
     override fun getAllWorkoutLogs(): Flow<List<WorkoutLog>> =
         workoutLogDao.getAll()
 
+    override fun getAllWorkoutLogsIncludingIgnored(): Flow<List<WorkoutLog>> =
+        workoutLogDao.getAllIncludingIgnored()
+
     override suspend fun getAllWorkoutLogsOnce(): List<WorkoutLog> =
         workoutLogDao.getAllOnce()
+
+    override suspend fun getAllWorkoutLogsOnceIncludingIgnored(): List<WorkoutLog> =
+        workoutLogDao.getAllOnceIncludingIgnored()
+
+    override suspend fun setWorkoutLogIgnored(connectId: String, isIgnored: Boolean) =
+        withContext(Dispatchers.IO) {
+            workoutLogDao.updateIgnored(connectId, isIgnored)
+        }
 
     override suspend fun getWorkoutLogByConnectId(connectId: String): WorkoutLog? =
         workoutLogDao.getByConnectId(connectId)

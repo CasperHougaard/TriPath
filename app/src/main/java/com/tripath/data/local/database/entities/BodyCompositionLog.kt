@@ -11,5 +11,6 @@ data class BodyCompositionLog(
     val bodyFatPercent: Double?,
     val boneMassKg: Double?,
     val leanMassKg: Double?,
-    val importedAt: Long
+    val importedAt: Long,
+    val isIgnored: Boolean = false
 )

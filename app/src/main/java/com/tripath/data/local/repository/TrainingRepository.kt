@@ -41,6 +41,11 @@ interface TrainingRepository {
     fun getTrainingPlansByDateRange(startDate: LocalDate, endDate: LocalDate): Flow<List<TrainingPlan>>
 
     /**
+     * Get training plans within a date range as a one-shot list.
+     */
+    suspend fun getTrainingPlansByDateRangeOnce(startDate: LocalDate, endDate: LocalDate): List<TrainingPlan>
+
+    /**
      * Get training plans by workout type.
      */
     fun getTrainingPlansByType(type: WorkoutType): Flow<List<TrainingPlan>>
@@ -88,9 +93,25 @@ interface TrainingRepository {
     fun getAllWorkoutLogs(): Flow<List<WorkoutLog>>
 
     /**
-     * Get all workout logs as a one-shot list.
+     * Get all workout logs including ignored ones as a reactive Flow
+     * (for the synced-data management list).
+     */
+    fun getAllWorkoutLogsIncludingIgnored(): Flow<List<WorkoutLog>>
+
+    /**
+     * Get all workout logs as a one-shot list (excludes ignored).
      */
     suspend fun getAllWorkoutLogsOnce(): List<WorkoutLog>
+
+    /**
+     * Get all workout logs including ignored ones as a one-shot list (for backup).
+     */
+    suspend fun getAllWorkoutLogsOnceIncludingIgnored(): List<WorkoutLog>
+
+    /**
+     * Set whether a workout log is ignored (excluded from analytics/training-load).
+     */
+    suspend fun setWorkoutLogIgnored(connectId: String, isIgnored: Boolean)
 
     /**
      * Get a workout log by its Health Connect ID.

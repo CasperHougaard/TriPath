@@ -492,7 +492,10 @@ class SettingsViewModel @Inject constructor(
         lthr: Int?,
         cssTimeString: String?,
         thresholdRunPaceString: String?,
-        goalDate: java.time.LocalDate?
+        goalDate: java.time.LocalDate?,
+        biologicalSex: com.tripath.data.model.BiologicalSex? = null,
+        birthDate: java.time.LocalDate? = null,
+        heightCm: Int? = null
     ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
@@ -505,7 +508,8 @@ class SettingsViewModel @Inject constructor(
             ftpBike?.let { if (it < 0) validationErrors.add("FTP must be non-negative") }
             maxHeartRate?.let { if (it < 0) validationErrors.add("Max HR must be non-negative") }
             lthr?.let { if (it < 0) validationErrors.add("LTHR must be non-negative") }
-            
+            heightCm?.let { if (it <= 0 || it > 300) validationErrors.add("Height must be between 1 and 300 cm") }
+
             // Validate and convert CSS time string
             val cssSeconds = parseCssTimeToSeconds(cssTimeString)
             if (cssTimeString != null && cssTimeString.isNotBlank() && cssSeconds == null) {
@@ -533,14 +537,20 @@ class SettingsViewModel @Inject constructor(
                 lthr = lthr,
                 cssSecondsper100m = cssSeconds,
                 thresholdRunPace = thresholdRunPace,
-                goalDate = goalDate
+                goalDate = goalDate,
+                biologicalSex = biologicalSex,
+                birthDate = birthDate,
+                heightCm = heightCm
             ) ?: UserProfile(
                 ftpBike = ftpBike,
                 maxHeartRate = maxHeartRate,
                 lthr = lthr,
                 cssSecondsper100m = cssSeconds,
                 thresholdRunPace = thresholdRunPace,
-                goalDate = goalDate
+                goalDate = goalDate,
+                biologicalSex = biologicalSex,
+                birthDate = birthDate,
+                heightCm = heightCm
             )
             
             try {

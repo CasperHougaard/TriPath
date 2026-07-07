@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -204,10 +205,12 @@ fun DayDetailScreen(
                             },
                             onDelete = { viewModel.deleteActivity(activity) },
                             onMoveToTomorrow = {
-                                viewModel.moveActivityToDate(
-                                    activity = activity,
-                                    newDate = missedRunTomorrowDate()
-                                )
+                                val newDate = missedRunTomorrowDate()
+                                if (activity.type == WorkoutType.STRENGTH) {
+                                    viewModel.moveStrengthWithCascade(activity, newDate)
+                                } else {
+                                    viewModel.moveActivityToDate(activity, newDate)
+                                }
                             },
                             onMoveToCustomDate = {
                                 customMoveActivity = activity
@@ -220,16 +223,57 @@ fun DayDetailScreen(
                 }
 
                 // Completed Workouts Section
-                if (uiState.completedWorkouts.isNotEmpty()) {
-                    item {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = Spacing.md),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
                             text = "Completed Workouts",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = Spacing.md)
+                            fontWeight = FontWeight.Bold
                         )
+                        IconButton(
+                            onClick = {
+                                navController.navigate(Screen.AddManualActivity.createRoute(date))
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Log activity manually",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
+                }
 
+                if (uiState.completedWorkouts.isEmpty()) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            )
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(Spacing.xl),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No completed workouts — tap + to log one manually",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                } else {
                     items(uiState.completedWorkouts) { log ->
                         CompletedWorkoutCard(
                             log = log,
@@ -298,7 +342,11 @@ fun DayDetailScreen(
                         }
 
                         if (selectedDate != null && selectedDate != activity.date) {
-                            viewModel.moveActivityToDate(activity, selectedDate)
+                            if (activity.type == WorkoutType.STRENGTH) {
+                                viewModel.moveStrengthWithCascade(activity, selectedDate)
+                            } else {
+                                viewModel.moveActivityToDate(activity, selectedDate)
+                            }
                         }
                         customMoveActivity = null
                     }
@@ -569,18 +617,24 @@ fun PlannedActivityCard(
             }
 
             if (missedRunAssistantState.isEligible) {
+                val activityNoun = if (activity.type == WorkoutType.STRENGTH) "workout" else "run"
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 Column(verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     Text(
-                        text = "Missed run assistant",
+                        text = "Missed $activityNoun assistant",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "This planned run is in the past and has no same-day completed run."
-                            + " Reschedule it or drop it from the plan.",
+                        text = if (activity.type == WorkoutType.STRENGTH) {
+                            "This planned workout is in the past with no same-day logged workout." +
+                                " Moving it slides the following sessions to keep your rest days."
+                        } else {
+                            "This planned run is in the past and has no same-day completed run." +
+                                " Reschedule it or drop it from the plan."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
@@ -605,7 +659,7 @@ fun PlannedActivityCard(
                         onClick = onDropMissedRun,
                         modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text("Drop Run")
+                        Text("Drop ${activityNoun.replaceFirstChar { it.uppercase() }}")
                     }
                 }
             }
@@ -655,7 +709,7 @@ fun CompletedWorkoutCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Imported ${log.type.name.lowercase().replaceFirstChar { it.uppercase() }}",
+                    text = "${if (log.connectId.startsWith("manual_")) "Manual" else "Imported"} ${log.type.name.lowercase().replaceFirstChar { it.uppercase() }}",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium
                 )

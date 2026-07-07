@@ -30,27 +30,61 @@ object RunGoalTrainingPlanMapper {
         7 to orderedWeekDays
     )
 
+    /**
+     * @param planStartDate the start of the first counting week (a Monday); progression weeks are laid
+     *   out from here.
+     * @param earliestRunDate the first day a run may be placed on. When it falls before [planStartDate]
+     *   (i.e. the plan starts mid-week), a partial lead-in week mirroring week 1 is prepended on the
+     *   remaining days. This lead-in does not count toward the progression — it just lets the athlete
+     *   start now instead of waiting for the week boundary.
+     */
     fun mapToTrainingPlans(
         goal: RunningGoal,
         progressionResult: RunningProgressionResult,
         preferredRunningDays: List<DayOfWeek>?,
-        planStartDate: LocalDate
+        planStartDate: LocalDate,
+        strengthDates: List<LocalDate> = emptyList(),
+        earliestRunDate: LocalDate = planStartDate
     ): List<TrainingPlan> {
         val preferredDays = (preferredRunningDays ?: goal.preferredDays).orEmpty()
 
-        return progressionResult.weeklyTargets.flatMap { weeklyTarget ->
-            mapWeek(
+        fun plansForWeek(weeklyTarget: RunningWeekTarget, weekStartDate: LocalDate): List<TrainingPlan> {
+            val weekEndExclusive = weekStartDate.plusDays(7)
+            val strengthWeekdays = strengthDates
+                .filter { !it.isBefore(weekStartDate) && it.isBefore(weekEndExclusive) }
+                .map { it.dayOfWeek }
+                .toSet()
+            return mapWeek(
                 weeklyTarget = weeklyTarget,
-                weekStartDate = planStartDate.plusWeeks((weeklyTarget.weekIndex - 1).toLong()),
-                preferredDays = preferredDays
+                weekStartDate = weekStartDate,
+                preferredDays = preferredDays,
+                strengthWeekdays = strengthWeekdays
             )
         }
+
+        val plans = mutableListOf<TrainingPlan>()
+
+        // Non-counting partial lead-in week: when the plan starts mid-week, mirror week 1 on the days
+        // that remain before the first counting week so the athlete can start immediately.
+        val firstTarget = progressionResult.weeklyTargets.firstOrNull()
+        if (firstTarget != null && earliestRunDate.isBefore(planStartDate)) {
+            val leadInWeekStart = planStartDate.minusWeeks(1)
+            plans += plansForWeek(firstTarget, leadInWeekStart)
+                .filter { !it.date.isBefore(earliestRunDate) }
+        }
+
+        plans += progressionResult.weeklyTargets.flatMap { weeklyTarget ->
+            val weekStartDate = planStartDate.plusWeeks((weeklyTarget.weekIndex - 1).toLong())
+            plansForWeek(weeklyTarget, weekStartDate)
+        }
+        return plans
     }
 
     private fun mapWeek(
         weeklyTarget: RunningWeekTarget,
         weekStartDate: LocalDate,
-        preferredDays: List<DayOfWeek>
+        preferredDays: List<DayOfWeek>,
+        strengthWeekdays: Set<DayOfWeek>
     ): List<TrainingPlan> {
         val sessionDistances = weeklyTarget.sessionDistancesMeters
         if (sessionDistances.isEmpty()) return emptyList()
@@ -58,7 +92,8 @@ object RunGoalTrainingPlanMapper {
         val scheduledDates = resolveDates(
             weekStartDate = weekStartDate,
             runsPerWeek = sessionDistances.size,
-            preferredDays = preferredDays
+            preferredDays = preferredDays,
+            strengthWeekdays = strengthWeekdays
         )
 
         val sessionTypes = weeklyTarget.sessionTypes.takeIf { it.size == sessionDistances.size }
@@ -103,12 +138,14 @@ object RunGoalTrainingPlanMapper {
     private fun resolveDates(
         weekStartDate: LocalDate,
         runsPerWeek: Int,
-        preferredDays: List<DayOfWeek>
+        preferredDays: List<DayOfWeek>,
+        strengthWeekdays: Set<DayOfWeek>
     ): List<LocalDate> {
         val weekDates = (0..6).map { weekStartDate.plusDays(it.toLong()) }
         val chosenDays = selectRunDays(
             runsPerWeek = runsPerWeek,
-            preferredRunningDays = preferredDays.toSet()
+            preferredRunningDays = preferredDays.toSet(),
+            strengthWeekdays = strengthWeekdays
         ).toSet()
 
         return weekDates.filter { it.dayOfWeek in chosenDays }
@@ -116,18 +153,23 @@ object RunGoalTrainingPlanMapper {
 
     private fun selectRunDays(
         runsPerWeek: Int,
-        preferredRunningDays: Set<DayOfWeek>
+        preferredRunningDays: Set<DayOfWeek>,
+        strengthWeekdays: Set<DayOfWeek> = emptySet()
     ): List<DayOfWeek> {
         val targetRuns = runsPerWeek.coerceIn(1, orderedWeekDays.size)
         val defaultPattern = defaultPatterns.getValue(targetRuns)
         val preferredDays = preferredRunningDays.intersect(orderedWeekDays.toSet())
 
-        if (preferredDays.isEmpty()) {
+        if (preferredDays.isEmpty() && strengthWeekdays.isEmpty()) {
             return defaultPattern
         }
 
         return generateDayCombinations(targetRuns)
             .maxWithOrNull(compareBy<List<DayOfWeek>>(
+                // Hard rule: never run on a strength day.
+                { it.none { day -> day in strengthWeekdays } },
+                // Soft preference: run the day immediately before a strength day.
+                { it.count { day -> day.plus(1L) in strengthWeekdays } },
                 { countConsecutiveRuns(it) == 0 },
                 { preferredOverlap(it, preferredDays) },
                 { longRunPreferenceScore(it) },

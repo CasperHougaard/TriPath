@@ -13,6 +13,11 @@ data class PerformanceDataPoint(
     val ctl: Double,
     val atl: Double,
     val tsb: Double,
-    val label: String // Date label for x-axis
+    val label: String, // Date label for x-axis
+    /**
+     * True when this point is a forecast derived from planned workouts (dates after today)
+     * rather than from completed workouts. Used by the chart to render projected values distinctly.
+     */
+    val isProjected: Boolean = false
 )
 

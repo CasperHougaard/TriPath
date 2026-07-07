@@ -163,7 +163,6 @@ class StatsViewModel @Inject constructor(
                             avgPower = avgPower
                         )
                     }
-                    .filterKeys { it in listOf(WorkoutType.RUN, WorkoutType.BIKE, WorkoutType.SWIM, WorkoutType.STRENGTH, WorkoutType.WALK, WorkoutType.HIKE) }
 
                 // Generate time series data for charts
                 val tssTrendData = generateTSSData(selectedLogs, startDate, endDate, _uiState.value.selectedPeriod)

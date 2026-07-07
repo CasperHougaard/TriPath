@@ -66,6 +66,19 @@
             </intent-filter>
         </activity-alias>
 
+        <!-- Nutrition home-screen widget (Jetpack Glance) -->
+        <receiver
+            android:name=".widget.NutritionWidgetReceiver"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/nutrition_widget_info" />
+        </receiver>
+
     </application>
 
     <!-- Declare that this app uses Health Connect -->

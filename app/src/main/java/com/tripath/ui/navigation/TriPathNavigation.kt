@@ -7,11 +7,16 @@ import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
+import com.tripath.ui.activities.AddManualActivityScreen
 import com.tripath.ui.coach.CoachScreen
 import com.tripath.ui.planner.AutoPlannerSettingsScreen
 import com.tripath.ui.planner.RunningGoalEditorScreen
 import com.tripath.ui.dashboard.DashboardScreen
 import com.tripath.ui.health.HealthScreen
+import com.tripath.ui.health.ManageHealthDataScreen
+import com.tripath.ui.health.bodyscan.BodyScanDetailScreen
+import com.tripath.ui.health.nutrition.NutritionDetailScreen
+import com.tripath.ui.health.sleep.SleepDetailScreen
 import com.tripath.ui.planner.WeeklyPlannerScreen
 import com.tripath.ui.progress.ProgressScreen
 import com.tripath.ui.settings.ProfileEditorScreen
@@ -25,6 +30,10 @@ sealed class Screen(val route: String) {
     object Stats : Screen("stats")
     object Coach : Screen("coach")
     object Health : Screen("health")
+    object ManageHealthData : Screen("health_manage_data")
+    object BodyScanDetail : Screen("body_scan_detail")
+    object SleepDetail : Screen("sleep_detail")
+    object NutritionDetail : Screen("nutrition_detail")
     object Settings : Screen("settings")
     object SyncedExercises : Screen("synced_exercises")
     object ExerciseImportDetail : Screen("exercise_import_detail/{sessionId}") {
@@ -46,6 +55,9 @@ sealed class Screen(val route: String) {
         fun createRoute(date: LocalDate): String {
             return "day_detail/${date.toEpochDay()}"
         }
+    }
+    object AddManualActivity : Screen("add_manual_activity/{epochDay}") {
+        fun createRoute(date: LocalDate): String = "add_manual_activity/${date.toEpochDay()}"
     }
 }
 
@@ -79,7 +91,26 @@ fun TriPathNavigation(
             )
         }
         composable(Screen.Health.route) {
-            HealthScreen()
+            HealthScreen(
+                onNavigateToBodyScanDetail = { navController.navigate(Screen.BodyScanDetail.route) },
+                onNavigateToSleepDetail = { navController.navigate(Screen.SleepDetail.route) },
+                onNavigateToNutritionDetail = { navController.navigate(Screen.NutritionDetail.route) }
+            )
+        }
+        composable(Screen.ManageHealthData.route) {
+            ManageHealthDataScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.BodyScanDetail.route) {
+            BodyScanDetailScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToManageData = { navController.navigate(Screen.ManageHealthData.route) }
+            )
+        }
+        composable(Screen.SleepDetail.route) {
+            SleepDetailScreen(onNavigateBack = { navController.popBackStack() })
+        }
+        composable(Screen.NutritionDetail.route) {
+            NutritionDetailScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.LegacyPlanningSettings.route) {
             AutoPlannerSettingsScreen(
@@ -145,6 +176,19 @@ fun TriPathNavigation(
             com.tripath.ui.daydetail.DayDetailScreen(
                 date = date,
                 navController = navController
+            )
+        }
+        composable(
+            route = Screen.AddManualActivity.route,
+            arguments = listOf(
+                navArgument("epochDay") { type = NavType.LongType }
+            )
+        ) { backStackEntry ->
+            val epochDay = backStackEntry.arguments?.getLong("epochDay") ?: LocalDate.now().toEpochDay()
+            val date = LocalDate.ofEpochDay(epochDay)
+            AddManualActivityScreen(
+                prefillDate = date,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }

@@ -50,7 +50,8 @@ private data class Data(
     val profile: UserProfile?,
     val activePeriods: List<SpecialPeriod>,
     val allPeriods: List<SpecialPeriod>,
-    val logs: List<WorkoutLog>
+    val logs: List<WorkoutLog>,
+    val plans: List<TrainingPlan>
 )
 
 private data class ReadinessData(
@@ -125,15 +126,17 @@ class CoachViewModel @Inject constructor(
                 repository.getUserProfile(),
                 repository.getActiveSpecialPeriods(today),
                 repository.getAllSpecialPeriods(),
-                repository.getAllWorkoutLogs() // We need logs for metrics
-            ) { profile, activePeriods, allPeriods, logs ->
-                Data(profile, activePeriods, allPeriods, logs)
+                repository.getAllWorkoutLogs(), // We need logs for metrics
+                repository.getAllTrainingPlans() // Planned workouts drive the forecast
+            ) { profile, activePeriods, allPeriods, logs, plans ->
+                Data(profile, activePeriods, allPeriods, logs, plans)
             }.collect { data ->
                 val profile = data.profile
                 val activePeriods = data.activePeriods
                 val allPeriods = data.allPeriods
                 val logs = data.logs
-                
+                val plans = data.plans
+
                 if (profile == null) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
@@ -147,20 +150,41 @@ class CoachViewModel @Inject constructor(
                 val currentPhase = CoachEngine.calculatePhase(today, goalDate)
                 
                 // Calculate Performance Metrics (CTL/ATL/TSB)
-                // We need history for the chart, let's say 90 days back like ProgressScreen
-                val chartStartDate = today.minusDays(90)
+                // Show 4 months of history for the chart.
+                val chartStartDate = today.minusMonths(4)
                 
                 // Filter logs for the relevant period up to today for chart
                 val chartLogs = logs.filter { !it.date.isAfter(today) }
 
-                // Calculate current metrics
+                // Calculate current metrics (actuals only, up to today)
                 val currentMetrics = TrainingMetricsCalculator.calculatePerformanceMetrics(
                     logs = chartLogs,
                     targetDate = today
                 )
-                
-                // Generate chart data
-                val performanceData = generatePerformanceData(chartLogs, chartStartDate, today)
+
+                // Future planned workouts (after today) drive the forecast portion of the curve.
+                val futurePlans = plans.filter { it.date.isAfter(today) }
+                val plannedTssByDate = futurePlans
+                    .groupBy { it.date }
+                    .mapValues { (_, dayPlans) -> dayPlans.sumOf { it.plannedTSS } }
+                // Completed workouts logged on a future date (e.g. manually marked done ahead of time).
+                val furthestFutureLog = logs.filter { it.date.isAfter(today) }.maxOfOrNull { it.date }
+                // Always project 2 months into the future; extend further if plans or future logs go beyond that.
+                val projectionEnd = maxOf(
+                    today.plusMonths(2),
+                    futurePlans.maxOfOrNull { it.date } ?: today,
+                    furthestFutureLog ?: today
+                )
+
+                // Generate chart data (actuals up to today, projection to projectionEnd).
+                // Pass full logs so future-dated completed workouts are counted on the forecast.
+                val performanceData = generatePerformanceData(
+                    logs = logs,
+                    plannedTssByDate = plannedTssByDate,
+                    startDate = chartStartDate,
+                    today = today,
+                    endDate = projectionEnd
+                )
 
                 // Generate Assessment
                 val assessment = generateCoachMessage(currentPhase, currentMetrics.tsb, activePeriods)
@@ -320,41 +344,58 @@ class CoachViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Builds the Performance Pulse chart series. Actuals (completed workouts) cover
+     * [startDate]..[today]; the curve is then projected forward to [endDate] using
+     * [plannedTssByDate]. Points after [today] are flagged as projected.
+     */
     private fun generatePerformanceData(
         logs: List<WorkoutLog>,
+        plannedTssByDate: Map<LocalDate, Int>,
         startDate: LocalDate,
+        today: LocalDate,
         endDate: LocalDate
     ): List<PerformanceDataPoint> {
-        val dataPoints = mutableListOf<PerformanceDataPoint>()
-        var currentDate = startDate
-        
-        // To optimize, we could calculate these iteratively instead of full recalculation each day,
-        // but re-using TrainingMetricsCalculator for each day is safer for correctness given the complex EWMA logic
-        // and data size is likely small enough on mobile.
-        // For a more optimized approach, we'd refactor TrainingMetricsCalculator to return a time series.
-        
-        while (!currentDate.isAfter(endDate)) {
-            val metrics = TrainingMetricsCalculator.calculatePerformanceMetrics(logs, currentDate)
-            
-            val label = if (currentDate.dayOfMonth == 1 || 
-                           currentDate.dayOfMonth == 15 || 
-                           currentDate == startDate || 
-                           currentDate == endDate) {
-                shortDateFormatter.format(currentDate)
+        val series = TrainingMetricsCalculator.calculatePerformanceSeries(
+            logs = logs,
+            plannedTssByDate = plannedTssByDate,
+            seriesStart = startDate,
+            seriesEnd = endDate,
+            actualUntil = today
+        )
+
+        // When planned workouts run out before the end of the visible frame, hold the
+        // curve flat from the last planned day instead of letting CTL/ATL decay toward
+        // zero on empty days. With no future plans at all, hold flat from today.
+        val lastPlannedDate = plannedTssByDate.keys.maxOrNull() ?: today
+        val flatlineFrom = if (lastPlannedDate.isBefore(endDate)) lastPlannedDate else null
+        val flatlineMetrics = flatlineFrom?.let { from -> series.firstOrNull { it.first == from }?.second }
+
+        return series.map { (date, metrics) ->
+            val effectiveMetrics = if (flatlineFrom != null && flatlineMetrics != null && date.isAfter(flatlineFrom)) {
+                flatlineMetrics
+            } else {
+                metrics
+            }
+
+            val label = if (date.dayOfMonth == 1 ||
+                           date.dayOfMonth == 15 ||
+                           date == startDate ||
+                           date == endDate) {
+                shortDateFormatter.format(date)
             } else {
                 ""
             }
-            
-            dataPoints.add(PerformanceDataPoint(
-                date = currentDate,
-                ctl = metrics.ctl,
-                atl = metrics.atl,
-                tsb = metrics.tsb,
-                label = label
-            ))
-            currentDate = currentDate.plusDays(1)
+
+            PerformanceDataPoint(
+                date = date,
+                ctl = effectiveMetrics.ctl,
+                atl = effectiveMetrics.atl,
+                tsb = effectiveMetrics.tsb,
+                label = label,
+                isProjected = date.isAfter(today)
+            )
         }
-        return dataPoints
     }
     
     private fun determineFormStatus(tsb: Double): FormStatus {
@@ -437,8 +478,9 @@ class CoachViewModel @Inject constructor(
                     )
                     val currentCtl = currentMetrics.ctl
                     
-                    // Calculate the next Monday (or current Monday if today is Monday)
-                    // This ensures plans always start at the beginning of a week
+                    // The first counting week always starts on a Monday so weekly progression and
+                    // goal-date math stay week-aligned. Training itself can begin earlier than this
+                    // (see earliestSessionDate below) via a non-counting partial lead-in week.
                     val planStartDate = today.with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
                     
                     // Get recent logs for cold-start validation (last 14 days)
@@ -451,13 +493,15 @@ class CoachViewModel @Inject constructor(
                     // This ensures clean slate: removes plans before, during, and after the new plan scope
                     repository.deleteAllTrainingPlans()
                     
-                    // Generate the plan starting from next Monday
+                    // Progression counting starts next Monday, but training (strength cadence and a
+                    // partial run lead-in week) may begin as early as today.
                     val generationResult = autoPlannerGenerator.generateSeason(
                         startDate = planStartDate,
                         currentCtl = currentCtl,
                         months = months,
                         recentRealLogs = recentLogs,
-                        runningGoal = effectiveRunningGoal
+                        runningGoal = effectiveRunningGoal,
+                        earliestSessionDate = today
                     )
                     
                     // Handle result

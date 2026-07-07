@@ -26,5 +26,7 @@
     <string name="backup_import_success">Backup imported successfully</string>
     <string name="backup_import_error">Error importing backup</string>
     <string name="backup_clear_confirm">Are you sure you want to delete all data? This cannot be undone.</string>
+    <string name="nutrition_widget_description">Quickly log calories, protein, carbs, fat and creatine.</string>
+    <string name="nutrition_widget_loading">Loading nutrition…</string>
 </resources>
 

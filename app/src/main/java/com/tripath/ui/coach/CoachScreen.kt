@@ -1,6 +1,8 @@
 package com.tripath.ui.coach
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -37,6 +40,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -169,6 +174,10 @@ fun CoachScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    MetricsExplanationCard(
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     // 5. Manual Intervention
                     SectionHeader(
                         title = "Interventions",
@@ -226,6 +235,82 @@ fun CoachScreen(
             ReadinessBreakdownDialog(
                 readinessStatus = currentReadinessState,
                 onDismiss = { showReadinessBreakdown = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun MetricsExplanationCard(
+    modifier: Modifier = Modifier
+) {
+    val ctlColor = MaterialTheme.colorScheme.primary
+    val atlColor = Color(0xFFFF69B4)
+    val tsbColor = Color(0xFF4CAF50)
+
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Text(
+                text = "Understanding the metrics",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            MetricExplanationRow(
+                dotColor = ctlColor,
+                title = "CTL — Fitness",
+                description = "Chronic Training Load: your long-term fitness, a 42-day average of training stress. It rises slowly as you train consistently."
+            )
+            MetricExplanationRow(
+                dotColor = atlColor,
+                title = "ATL — Fatigue",
+                description = "Acute Training Load: your short-term fatigue, a 7-day average of training stress. It spikes quickly after hard sessions and fades with rest."
+            )
+            MetricExplanationRow(
+                dotColor = tsbColor,
+                title = "TSB — Form",
+                description = "Training Stress Balance (CTL − ATL): how fresh you are. A positive TSB means your fitness outweighs your fatigue, so you've absorbed your training and are rested and race-ready. During build phases a slightly negative TSB is normal and productive — you only want it clearly positive when peaking for a race."
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetricExplanationRow(
+    dotColor: Color,
+    title: String,
+    description: String
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 6.dp)
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(dotColor)
+        )
+        Column(
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

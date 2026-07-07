@@ -32,7 +32,11 @@ class AutoPlannerGenerator @Inject constructor(
         currentCtl: Double,
         months: Int = 3,
         recentRealLogs: List<WorkoutLog> = emptyList(),
-        runningGoal: RunningGoal? = null
+        runningGoal: RunningGoal? = null,
+        // The first day any session may be placed on (typically today). Running progression weeks stay
+        // aligned to [startDate] for counting/goal-date math, but both strength and a partial run
+        // lead-in week can begin here so training isn't delayed to the plan's week start.
+        earliestSessionDate: LocalDate = startDate
     ): GenerationResult {
         val smartEnabled = preferencesManager.autoPlannerEnabledFlow.first()
         if (!smartEnabled) {
@@ -43,54 +47,77 @@ class AutoPlannerGenerator @Inject constructor(
             )
         }
 
+        val strengthEnabled = preferencesManager.autoPlanStrengthEnabledFlow.first()
+        val considersStrength = preferencesManager.runningConsidersStrengthFlow.first()
+
         val effectiveRunningGoal = runningGoal ?: preferencesManager.getActiveRunningGoal()
-            ?: return GenerationResult.Failure(
+        if (effectiveRunningGoal == null && !strengthEnabled) {
+            return GenerationResult.Failure(
                 reason = "Running goal required",
-                details = "Auto-planner is now run-focused. Create a running goal in Auto-planner Settings before generating a plan."
+                details = "Auto-planner is run-focused. Create a running goal, or enable Add Strength Training, in Auto-planner Settings before generating a plan."
             )
-
-        // The run-only planner derives progression entirely from the saved running goal.
-        val progression = RunningProgressionRules.generateWeeklyTargets(
-            goal = effectiveRunningGoal,
-            planStartDate = startDate,
-            openEndedWeeks = (months * 4).coerceAtLeast(1)
-        )
-
-        when {
-            progression.warnings.contains(RunningProgressionWarning.TARGET_DATE_TOO_SOON) -> {
-                return GenerationResult.Failure(
-                    reason = "TARGET_DATE_TOO_SOON",
-                    details = "Complete-distance running goals need a target date at least 2 weeks after the generated plan start."
-                )
-            }
-
-            progression.warnings.contains(RunningProgressionWarning.TARGET_DATE_TOO_FAR) -> {
-                return GenerationResult.Failure(
-                    reason = "TARGET_DATE_TOO_FAR",
-                    details = "Complete-distance running goals can be planned up to 52 weeks ahead. Choose a closer target date."
-                )
-            }
-
-            progression.warnings.contains(RunningProgressionWarning.LONG_GOAL_HORIZON) -> {
-                Log.w(tag, "LONG_GOAL_HORIZON: Running goal extends beyond the normal 24-week planning window.")
-            }
         }
 
-        val runningGoalPlans = RunGoalTrainingPlanMapper.mapToTrainingPlans(
-            goal = effectiveRunningGoal,
-            progressionResult = progression,
-            preferredRunningDays = effectiveRunningGoal.preferredDays,
-            planStartDate = startDate
-        )
+        val weeks = (months * 4).coerceAtLeast(1)
 
-        Log.i(tag, "RUNNING-GOAL GENERATION COMPLETE. Created ${runningGoalPlans.size} workouts.")
-        return if (runningGoalPlans.isEmpty()) {
-            GenerationResult.Failure(
-                reason = "No running-goal plans were generated",
-                details = "The running-goal path completed but produced no plans. Check the running goal inputs and preferred days."
+        // Strength sessions run on a fixed every-3rd-day cadence, independent of the running goal.
+        val strengthPlans = if (strengthEnabled) {
+            StrengthPlanGenerator.generateStrengthPlans(
+                firstWorkoutDate = preferencesManager.getStrengthFirstWorkoutDate(),
+                planStartDate = startDate,
+                weeks = weeks,
+                earliestSessionDate = earliestSessionDate
             )
         } else {
-            GenerationResult.Success(runningGoalPlans)
+            emptyList()
+        }
+
+        // The run planner derives progression entirely from the saved running goal.
+        val runningGoalPlans = if (effectiveRunningGoal != null) {
+            val progression = RunningProgressionRules.generateWeeklyTargets(
+                goal = effectiveRunningGoal,
+                planStartDate = startDate,
+                openEndedWeeks = weeks
+            )
+
+            when {
+                progression.warnings.contains(RunningProgressionWarning.TARGET_DATE_TOO_SOON) ->
+                    return GenerationResult.Failure(
+                        reason = "TARGET_DATE_TOO_SOON",
+                        details = "Complete-distance running goals need a target date at least 2 weeks after the generated plan start."
+                    )
+
+                progression.warnings.contains(RunningProgressionWarning.TARGET_DATE_TOO_FAR) ->
+                    return GenerationResult.Failure(
+                        reason = "TARGET_DATE_TOO_FAR",
+                        details = "Complete-distance running goals can be planned up to 52 weeks ahead. Choose a closer target date."
+                    )
+
+                progression.warnings.contains(RunningProgressionWarning.LONG_GOAL_HORIZON) ->
+                    Log.w(tag, "LONG_GOAL_HORIZON: Running goal extends beyond the normal 24-week planning window.")
+            }
+
+            RunGoalTrainingPlanMapper.mapToTrainingPlans(
+                goal = effectiveRunningGoal,
+                progressionResult = progression,
+                preferredRunningDays = effectiveRunningGoal.preferredDays,
+                planStartDate = startDate,
+                strengthDates = if (considersStrength) strengthPlans.map { it.date } else emptyList(),
+                earliestRunDate = earliestSessionDate
+            )
+        } else {
+            emptyList()
+        }
+
+        val allPlans = runningGoalPlans + strengthPlans
+        Log.i(tag, "GENERATION COMPLETE. Runs=${runningGoalPlans.size}, Strength=${strengthPlans.size}.")
+        return if (allPlans.isEmpty()) {
+            GenerationResult.Failure(
+                reason = "No plans were generated",
+                details = "Generation completed but produced no plans. Check the running goal inputs, preferred days, and strength settings."
+            )
+        } else {
+            GenerationResult.Success(allPlans)
         }
     }
 }

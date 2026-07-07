@@ -6,6 +6,7 @@ import com.tripath.data.local.database.AppDatabase
 import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.NutritionLogDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
@@ -17,6 +18,10 @@ import com.tripath.data.local.database.migrations.MIGRATION_11_12
 import com.tripath.data.local.database.migrations.MIGRATION_12_13
 import com.tripath.data.local.database.migrations.MIGRATION_13_14
 import com.tripath.data.local.database.migrations.MIGRATION_14_15
+import com.tripath.data.local.database.migrations.MIGRATION_15_16
+import com.tripath.data.local.database.migrations.MIGRATION_16_17
+import com.tripath.data.local.database.migrations.MIGRATION_17_18
+import com.tripath.data.local.database.migrations.MIGRATION_18_19
 import com.tripath.data.local.database.migrations.MIGRATION_2_3
 import com.tripath.data.local.database.migrations.MIGRATION_3_4
 import com.tripath.data.local.database.migrations.MIGRATION_4_5
@@ -66,7 +71,11 @@ object DatabaseModule {
                 MIGRATION_11_12,
                 MIGRATION_12_13,
                 MIGRATION_13_14,
-                MIGRATION_14_15
+                MIGRATION_14_15,
+                MIGRATION_15_16,
+                MIGRATION_16_17,
+                MIGRATION_17_18,
+                MIGRATION_18_19
             )
             .fallbackToDestructiveMigration() // Development fallback - allows DB to rebuild if migration fails
             .build()
@@ -118,6 +127,12 @@ object DatabaseModule {
     @Singleton
     fun provideBodyCompositionDao(database: AppDatabase): BodyCompositionDao {
         return database.bodyCompositionDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideNutritionLogDao(database: AppDatabase): NutritionLogDao {
+        return database.nutritionLogDao()
     }
 }
 

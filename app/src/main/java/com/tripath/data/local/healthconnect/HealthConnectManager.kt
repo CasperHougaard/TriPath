@@ -547,6 +547,7 @@ class HealthConnectManager @Inject constructor(
                         if (existingLog == null) {
                             val recoveredWorkout = rebuildWorkoutLogFromRawData(existingData, userProfile)
                             repository.insertWorkoutLog(recoveredWorkout)
+                            removePlannedStrengthForCompletedWorkout(recoveredWorkout)
                             newWorkouts.add(recoveredWorkout)
                             newlyImportedCount++
                         } else {
@@ -610,6 +611,7 @@ class HealthConnectManager @Inject constructor(
 
                     rawWorkoutDataDao.insert(rawData)
                     repository.insertWorkoutLog(workoutLog)
+                    removePlannedStrengthForCompletedWorkout(workoutLog)
                     newWorkouts.add(workoutLog)
                     newlyImportedCount++
                 } catch (e: Exception) {
@@ -708,6 +710,23 @@ class HealthConnectManager @Inject constructor(
         )
     }
 
+    /**
+     * When a strength workout is imported, any strength training that was planned for the same
+     * day has effectively been completed, so its planned entry is removed to avoid showing it as
+     * still-to-do. Only STRENGTH plans are affected; other planned activities are left untouched.
+     */
+    private suspend fun removePlannedStrengthForCompletedWorkout(workoutLog: WorkoutLog) {
+        if (workoutLog.type != WorkoutType.STRENGTH) return
+        try {
+            val plannedStrength = repository
+                .getTrainingPlansByDateRangeOnce(workoutLog.date, workoutLog.date)
+                .filter { it.type == WorkoutType.STRENGTH }
+            plannedStrength.forEach { repository.deleteTrainingPlan(it) }
+        } catch (e: Exception) {
+            Log.e("HealthConnect", "Error removing planned strength for ${workoutLog.date}", e)
+        }
+    }
+
     private suspend fun rebuildWorkoutLogFromRawData(
         rawData: RawWorkoutData,
         userProfile: UserProfile
@@ -762,13 +781,14 @@ class HealthConnectManager @Inject constructor(
                         }
                     } else emptyList()
 
-                    // Recalculate everything
+                    // Recalculate everything, preserving the user's ignore flag
+                    val wasIgnored = repository.getWorkoutLogByConnectId(rawData.connectId)?.isIgnored ?: false
                     val updatedWorkoutLog = processRawDataToWorkoutLog(
                         rawData = rawData,
                         hrSamples = hrSamples,
                         powerSamples = powerSamples,
                         userProfile = userProfile
-                    )
+                    ).copy(isIgnored = wasIgnored)
 
                     repository.insertWorkoutLog(updatedWorkoutLog)
                     processedCount++

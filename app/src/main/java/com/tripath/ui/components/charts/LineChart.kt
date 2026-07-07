@@ -21,6 +21,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
@@ -55,17 +56,24 @@ fun LineChart(
     val ctlValues = data.map { it.ctl }
     val atlValues = data.map { it.atl }
     val tsbValues = data.map { it.tsb }
-    
+
+    // Index of the last actual (non-projected) point. Trends and the "current" TSB
+    // reflect today's actuals, not the forecast tail.
+    val lastActualIndex = data.indexOfLast { !it.isProjected }.let {
+        if (it < 0) data.size - 1 else it
+    }
+    val hasProjection = lastActualIndex < data.size - 1
+
     // Get current and previous TSB values for trend calculation
-    val currentTSB = data.lastOrNull()?.tsb ?: 0.0
-    val previousTSB = if (data.size >= 2) data[data.size - 2].tsb else currentTSB
+    val currentTSB = data.getOrNull(lastActualIndex)?.tsb ?: 0.0
+    val previousTSB = if (lastActualIndex >= 1) data[lastActualIndex - 1].tsb else currentTSB
     val tsbTrend = currentTSB - previousTSB
-    
-    // Calculate 7-day and 30-day trends
-    val sevenDaysAgoIndex = (data.size - 8).coerceAtLeast(0)
-    val thirtyDaysAgoIndex = (data.size - 31).coerceAtLeast(0)
-    val tsb7DaysAgo = if (data.size >= 8) data[sevenDaysAgoIndex].tsb else currentTSB
-    val tsb30DaysAgo = if (data.size >= 31) data[thirtyDaysAgoIndex].tsb else currentTSB
+
+    // Calculate 7-day and 30-day trends (relative to the last actual point)
+    val sevenDaysAgoIndex = (lastActualIndex - 7).coerceAtLeast(0)
+    val thirtyDaysAgoIndex = (lastActualIndex - 30).coerceAtLeast(0)
+    val tsb7DaysAgo = if (lastActualIndex >= 7) data[sevenDaysAgoIndex].tsb else currentTSB
+    val tsb30DaysAgo = if (lastActualIndex >= 30) data[thirtyDaysAgoIndex].tsb else currentTSB
     val tsb7DayChange = currentTSB - tsb7DaysAgo
     val tsb30DayChange = currentTSB - tsb30DaysAgo
     
@@ -192,57 +200,71 @@ fun LineChart(
                     )
                 }
 
-                // Draw CTL line
-                if (data.isNotEmpty()) {
-                    val ctlPath = Path()
-                    data.forEachIndexed { index, point ->
-                        val x = chartLeft + (chartWidth / (data.size - 1).coerceAtLeast(1)) * index
-                        val normalizedCtl = ((point.ctl - chartMin) / chartRange).coerceIn(0.0, 1.0)
-                        val y = chartBottom - (chartHeight * normalizedCtl.toFloat())
-                        
-                        if (index == 0) {
-                            ctlPath.moveTo(x, y)
-                        } else {
-                            ctlPath.lineTo(x, y)
-                        }
+                // Draw a metric line, split into a solid actual segment and a dashed projected segment.
+                // The projected segment starts at lastActualIndex so it connects seamlessly.
+                fun drawMetricLine(valueSelector: (PerformanceDataPoint) -> Double, color: Color) {
+                    if (data.isEmpty()) return
+
+                    fun xFor(index: Int) =
+                        chartLeft + (chartWidth / (data.size - 1).coerceAtLeast(1)) * index
+                    fun yFor(index: Int): Float {
+                        val normalized = ((valueSelector(data[index]) - chartMin) / chartRange).coerceIn(0.0, 1.0)
+                        return chartBottom - (chartHeight * normalized.toFloat())
                     }
-                    
+
+                    // Solid actual segment: [0, lastActualIndex]
+                    val actualPath = Path()
+                    for (index in 0..lastActualIndex) {
+                        if (index == 0) actualPath.moveTo(xFor(index), yFor(index))
+                        else actualPath.lineTo(xFor(index), yFor(index))
+                    }
                     drawPath(
-                        path = ctlPath,
-                        color = ctlColor,
+                        path = actualPath,
+                        color = color,
                         style = Stroke(
                             width = 3.dp.toPx(),
                             cap = StrokeCap.Round,
                             join = StrokeJoin.Round
                         )
+                    )
+
+                    // Dashed projected segment: [lastActualIndex, end]
+                    if (lastActualIndex < data.size - 1) {
+                        val projectedPath = Path()
+                        for (index in lastActualIndex until data.size) {
+                            if (index == lastActualIndex) projectedPath.moveTo(xFor(index), yFor(index))
+                            else projectedPath.lineTo(xFor(index), yFor(index))
+                        }
+                        drawPath(
+                            path = projectedPath,
+                            color = color.copy(alpha = 0.6f),
+                            style = Stroke(
+                                width = 3.dp.toPx(),
+                                cap = StrokeCap.Round,
+                                join = StrokeJoin.Round,
+                                pathEffect = PathEffect.dashPathEffect(
+                                    floatArrayOf(10.dp.toPx(), 8.dp.toPx())
+                                )
+                            )
+                        )
+                    }
+                }
+
+                // Vertical "today" divider between actuals and projection
+                if (lastActualIndex in 0 until data.size - 1) {
+                    val todayX = chartLeft + (chartWidth / (data.size - 1).coerceAtLeast(1)) * lastActualIndex
+                    drawLine(
+                        color = gridLineColor,
+                        start = Offset(todayX, chartTop),
+                        end = Offset(todayX, chartBottom),
+                        strokeWidth = 1.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 6.dp.toPx()))
                     )
                 }
 
-                // Draw ATL line
-                if (data.isNotEmpty()) {
-                    val atlPath = Path()
-                    data.forEachIndexed { index, point ->
-                        val x = chartLeft + (chartWidth / (data.size - 1).coerceAtLeast(1)) * index
-                        val normalizedAtl = ((point.atl - chartMin) / chartRange).coerceIn(0.0, 1.0)
-                        val y = chartBottom - (chartHeight * normalizedAtl.toFloat())
-                        
-                        if (index == 0) {
-                            atlPath.moveTo(x, y)
-                        } else {
-                            atlPath.lineTo(x, y)
-                        }
-                    }
-                    
-                    drawPath(
-                        path = atlPath,
-                        color = atlColor,
-                        style = Stroke(
-                            width = 3.dp.toPx(),
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        )
-                    )
-                }
+                // Draw CTL and ATL lines
+                drawMetricLine({ it.ctl }, ctlColor)
+                drawMetricLine({ it.atl }, atlColor)
 
                 // Draw X-axis labels (only for points with non-empty labels)
                 val xAxisTextStyle = TextStyle(
@@ -320,6 +342,15 @@ fun LineChart(
                     style = MaterialTheme.typography.labelSmall,
                     color = tsbTextColor
                 )
+
+                if (hasProjection) {
+                    Spacer(modifier = Modifier.width(Spacing.md))
+                    Text(
+                        text = "- - - planned",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
             }
             
             // TSB mini sparkline and trend info
@@ -329,8 +360,8 @@ fun LineChart(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Mini TSB sparkline (last 14 days or available data)
-                val sparklineData = data.takeLast(14)
+                // Mini TSB sparkline (last 14 actual days, excluding the forecast tail)
+                val sparklineData = data.subList(0, lastActualIndex + 1).takeLast(14)
                 if (sparklineData.size >= 2) {
                     Box(
                         modifier = Modifier

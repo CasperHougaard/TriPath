@@ -16,10 +16,17 @@ import java.time.LocalDate
 interface SleepLogDao {
 
     /**
-     * Get all sleep logs ordered by date (newest first).
+     * Get all non-ignored sleep logs ordered by date (newest first).
+     * Ignored sessions are excluded from recovery analytics and charts.
+     */
+    @Query("SELECT * FROM sleep_logs WHERE isIgnored = 0 ORDER BY date DESC")
+    fun getAll(): Flow<List<SleepLog>>
+
+    /**
+     * Get ALL sleep logs including ignored ones (for the synced-data management list).
      */
     @Query("SELECT * FROM sleep_logs ORDER BY date DESC")
-    fun getAll(): Flow<List<SleepLog>>
+    fun getAllIncludingIgnored(): Flow<List<SleepLog>>
 
     /**
      * Get all sleep logs as a one-shot list (for backup).
@@ -36,14 +43,14 @@ interface SleepLogDao {
     /**
      * Get sleep logs within a date range.
      */
-    @Query("SELECT * FROM sleep_logs WHERE date >= :startDate AND date <= :endDate ORDER BY date DESC")
+    @Query("SELECT * FROM sleep_logs WHERE isIgnored = 0 AND date >= :startDate AND date <= :endDate ORDER BY date DESC")
     fun getByDateRange(startDate: Long, endDate: Long): Flow<List<SleepLog>>
 
 
     /**
-     * Get sleep log for a specific date.
+     * Get sleep log for a specific date (excludes ignored sessions).
      */
-    @Query("SELECT * FROM sleep_logs WHERE date = :date")
+    @Query("SELECT * FROM sleep_logs WHERE isIgnored = 0 AND date = :date")
     suspend fun getByDate(date: Long): SleepLog?
 
     /**
@@ -60,9 +67,16 @@ interface SleepLogDao {
 
     /**
      * Check if a sleep log exists for the given Health Connect ID.
+     * Includes ignored sessions so a sync never re-imports an ignored one.
      */
     @Query("SELECT EXISTS(SELECT 1 FROM sleep_logs WHERE connectId = :connectId)")
     suspend fun exists(connectId: String): Boolean
+
+    /**
+     * Toggle whether a sleep session is ignored (excluded from recovery analytics).
+     */
+    @Query("UPDATE sleep_logs SET isIgnored = :isIgnored WHERE connectId = :connectId")
+    suspend fun updateIgnored(connectId: String, isIgnored: Boolean)
 
     /**
      * Insert a new sleep log (replaces if already exists).

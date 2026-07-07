@@ -21,6 +21,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +49,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tripath.data.model.BiologicalSex
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import kotlinx.coroutines.launch
@@ -74,6 +76,10 @@ fun ProfileEditorScreen(
     var tenKmTime by remember { mutableStateOf("") }
     var goalDate by remember { mutableStateOf<LocalDate?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
+    var biologicalSex by remember { mutableStateOf<BiologicalSex?>(null) }
+    var birthDate by remember { mutableStateOf<LocalDate?>(null) }
+    var showBirthDatePicker by remember { mutableStateOf(false) }
+    var heightCm by remember { mutableStateOf("") }
 
     // Initialize form fields from profile when loaded
     LaunchedEffect(uiState.userProfile) {
@@ -84,6 +90,9 @@ fun ProfileEditorScreen(
             cssTimeString = viewModel.formatSecondsToCssTime(profile.cssSecondsper100m) ?: ""
             thresholdRunPaceString = viewModel.formatSecondsToCssTime(profile.thresholdRunPace) ?: ""
             goalDate = profile.goalDate
+            biologicalSex = profile.biologicalSex
+            birthDate = profile.birthDate
+            heightCm = profile.heightCm?.toString() ?: ""
         }
     }
 
@@ -389,6 +398,101 @@ fun ProfileEditorScreen(
                 }
             }
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.md))
+
+            Text(
+                text = "Body & Demographics",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(bottom = Spacing.sm)
+            )
+            Text(
+                text = "Used to show healthy reference ranges for body fat, BMI, and nutrition targets.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.padding(bottom = Spacing.md)
+            )
+
+            // Biological sex
+            Text(
+                text = "Biological sex",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                BiologicalSex.entries.forEach { sex ->
+                    FilterChip(
+                        selected = biologicalSex == sex,
+                        onClick = { biologicalSex = if (biologicalSex == sex) null else sex },
+                        label = { Text(sex.label) }
+                    )
+                }
+            }
+
+            // Birth date
+            val birthDatePickerState = rememberDatePickerState(
+                initialSelectedDateMillis = birthDate?.atStartOfDay(
+                    java.time.ZoneId.systemDefault()
+                )?.toInstant()?.toEpochMilli(),
+                yearRange = IntRange(1920, LocalDate.now().year)
+            )
+            OutlinedTextField(
+                value = birthDate?.format(dateFormatter) ?: "",
+                onValueChange = { },
+                label = { Text("Birth date") },
+                placeholder = { Text("Select your birth date") },
+                supportingText = {
+                    val age = birthDate?.let { java.time.Period.between(it, LocalDate.now()).years }
+                    Text(age?.let { "Age: $it years" } ?: "Age is derived from this date")
+                },
+                readOnly = true,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    TextButton(onClick = { showBirthDatePicker = true }) {
+                        Text(if (birthDate == null) "Select" else "Change")
+                    }
+                }
+            )
+
+            if (showBirthDatePicker) {
+                DatePickerDialog(
+                    onDismissRequest = { showBirthDatePicker = false },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                birthDatePickerState.selectedDateMillis?.let { millis ->
+                                    birthDate = java.time.Instant.ofEpochMilli(millis)
+                                        .atZone(java.time.ZoneId.systemDefault())
+                                        .toLocalDate()
+                                }
+                                showBirthDatePicker = false
+                            }
+                        ) { Text("OK") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showBirthDatePicker = false }) { Text("Cancel") }
+                    }
+                ) {
+                    DatePicker(state = birthDatePickerState)
+                }
+            }
+
+            // Height
+            OutlinedTextField(
+                value = heightCm,
+                onValueChange = { newValue ->
+                    if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                        heightCm = newValue
+                    }
+                },
+                label = { Text("Height") },
+                placeholder = { Text("cm") },
+                supportingText = { Text("Height in centimetres") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
             Spacer(modifier = Modifier.height(Spacing.lg))
 
             // Save Button
@@ -403,7 +507,10 @@ fun ProfileEditorScreen(
                         lthr = lthrValue,
                         cssTimeString = cssTimeString.takeIf { it.isNotBlank() },
                         thresholdRunPaceString = thresholdRunPaceString.takeIf { it.isNotBlank() },
-                        goalDate = goalDate
+                        goalDate = goalDate,
+                        biologicalSex = biologicalSex,
+                        birthDate = birthDate,
+                        heightCm = heightCm.toIntOrNull()
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),

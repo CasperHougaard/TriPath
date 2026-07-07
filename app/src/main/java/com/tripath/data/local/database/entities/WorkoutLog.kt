@@ -49,6 +49,12 @@ data class WorkoutLog(
     val hrZoneDistribution: Map<String, Int>? = null,
 
     /** Time distribution in seconds across power zones (optional) */
-    val powerZoneDistribution: Map<String, Int>? = null
+    val powerZoneDistribution: Map<String, Int>? = null,
+
+    /**
+     * When true, this workout is excluded from all analytics, training-load and charts.
+     * The record is kept and can be re-included from the synced-data list.
+     */
+    val isIgnored: Boolean = false
 )
 

@@ -1,47 +1,49 @@
 package com.tripath.ui.health
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.MonitorWeight
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.ui.components.SectionHeader
-import com.tripath.ui.health.components.BodyMetricChart
+import com.tripath.ui.health.components.SummaryTile
 import com.tripath.ui.theme.Spacing
+
+private val BodyScanColor = Color(0xFF5C6BC0)
+private val SleepColor = Color(0xFF7E57C2)
+private val NutritionColor = Color(0xFF26A69A)
 
 @Composable
 fun HealthScreen(
+    onNavigateToBodyScanDetail: () -> Unit = {},
+    onNavigateToSleepDetail: () -> Unit = {},
+    onNavigateToNutritionDetail: () -> Unit = {},
     viewModel: HealthViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val sleepLogs by viewModel.sleepLogs.collectAsStateWithLifecycle()
+    val nutritionLogs by viewModel.nutritionLogs.collectAsStateWithLifecycle()
+
+    // Auto-read data on open (syncs only if stale / permissions granted).
+    LaunchedEffect(Unit) { viewModel.refreshIfStale() }
 
     Scaffold { paddingValues ->
         Column(
@@ -57,99 +59,12 @@ fun HealthScreen(
             ) {
                 SectionHeader(
                     title = "Health",
-                    subtitle = "Body composition from Withings",
-                    action = {
-                        if (state.isSyncing) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                        } else {
-                            IconButton(onClick = { viewModel.sync() }) {
-                                Icon(Icons.Default.Sync, contentDescription = "Sync from Health Connect")
-                            }
-                        }
-                    }
+                    subtitle = "Body scan, sleep & nutrition"
                 )
 
-                // Period selector
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    HealthTimePeriod.entries.forEach { period ->
-                        FilterChip(
-                            selected = state.selectedPeriod == period,
-                            onClick = { viewModel.selectPeriod(period) },
-                            label = { Text(period.label) }
-                        )
-                    }
-                }
-
-                if (state.logs.isEmpty()) {
-                    EmptyStateCard(onSync = { viewModel.sync() }, isSyncing = state.isSyncing)
-                } else {
-                    // Latest snapshot
-                    SectionHeader(title = "Current Metrics")
-                    MetricsGrid(state)
-
-                    // Weight chart
-                    val weightPoints = state.filteredLogs.mapNotNull { log ->
-                        log.weightKg?.let { log.timestamp to it }
-                    }
-                    if (weightPoints.size >= 2) {
-                        SectionHeader(title = "Weight", subtitle = "kg")
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            BodyMetricChart(
-                                dataPoints = weightPoints,
-                                accentColor = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(Spacing.md)
-                            )
-                        }
-                    }
-
-                    // Body fat chart
-                    val fatPoints = state.filteredLogs.mapNotNull { log ->
-                        log.bodyFatPercent?.let { log.timestamp to it }
-                    }
-                    if (fatPoints.size >= 2) {
-                        SectionHeader(title = "Body Fat", subtitle = "%")
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            BodyMetricChart(
-                                dataPoints = fatPoints,
-                                accentColor = Color(0xFFE57373),
-                                modifier = Modifier.padding(Spacing.md)
-                            )
-                        }
-                    }
-
-                    // Muscle mass chart
-                    val leanPoints = state.filteredLogs.mapNotNull { log ->
-                        log.leanMassKg?.let { log.timestamp to it }
-                    }
-                    if (leanPoints.size >= 2) {
-                        SectionHeader(title = "Muscle Mass", subtitle = "kg")
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            BodyMetricChart(
-                                dataPoints = leanPoints,
-                                accentColor = Color(0xFF81C784),
-                                modifier = Modifier.padding(Spacing.md)
-                            )
-                        }
-                    }
-
-                    // Bone mass chart
-                    val bonePoints = state.filteredLogs.mapNotNull { log ->
-                        log.boneMassKg?.let { log.timestamp to it }
-                    }
-                    if (bonePoints.size >= 2) {
-                        SectionHeader(title = "Bone Mass", subtitle = "kg")
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            BodyMetricChart(
-                                dataPoints = bonePoints,
-                                accentColor = Color(0xFFFFB74D),
-                                modifier = Modifier.padding(Spacing.md)
-                            )
-                        }
-                    }
-                }
+                BodyScanSummaryTile(state, onNavigateToBodyScanDetail)
+                SleepSummaryTile(sleepLogs, onNavigateToSleepDetail)
+                NutritionSummaryTile(nutritionLogs, onNavigateToNutritionDetail)
 
                 Spacer(modifier = Modifier.height(Spacing.xl))
             }
@@ -158,113 +73,65 @@ fun HealthScreen(
 }
 
 @Composable
-private fun MetricsGrid(state: HealthUiState) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-    ) {
-        MetricCard(
-            label = "Weight",
-            value = state.latestWeight?.let { "%.1f kg".format(it) } ?: "—",
-            delta = state.weightDelta,
-            unit = "kg",
-            modifier = Modifier.weight(1f)
-        )
-        MetricCard(
-            label = "Body Fat",
-            value = state.latestFatPercent?.let { "%.1f%%".format(it) } ?: "—",
-            delta = state.fatPercentDelta,
-            unit = "%",
-            modifier = Modifier.weight(1f)
-        )
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md)
-    ) {
-        MetricCard(
-            label = "Muscle Mass",
-            value = state.latestLeanMass?.let { "%.1f kg".format(it) } ?: "—",
-            delta = state.leanMassDelta,
-            unit = "kg",
-            modifier = Modifier.weight(1f)
-        )
-        MetricCard(
-            label = "Bone Mass",
-            value = state.latestBoneMass?.let { "%.2f kg".format(it) } ?: "—",
-            delta = state.boneMassDelta,
-            unit = "kg",
-            modifier = Modifier.weight(1f)
-        )
-    }
+private fun BodyScanSummaryTile(state: HealthUiState, onClick: () -> Unit) {
+    SummaryTile(
+        title = "Body Scan",
+        value = state.latestWeight?.let { "%.1f kg".format(it) },
+        subtitle = buildString {
+            state.latestFatPercent?.let { append("%.1f%% fat".format(it)) }
+            state.latestLeanMass?.let {
+                if (isNotEmpty()) append(" · ")
+                append("%.1f kg fat-free".format(it))
+            }
+        }.ifEmpty { null },
+        icon = Icons.Default.MonitorWeight,
+        accent = BodyScanColor,
+        onClick = onClick,
+        emptyMessage = "Connect a smart scale to see body composition"
+    )
 }
 
 @Composable
-private fun MetricCard(
-    label: String,
-    value: String,
-    delta: Double?,
-    unit: String,
-    modifier: Modifier = Modifier
-) {
-    Card(modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(Spacing.md),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (delta != null) {
-                val sign = if (delta >= 0) "+" else ""
-                val color = when {
-                    label == "Body Fat" || label == "Weight" -> if (delta < 0) Color(0xFF4CAF50) else Color(0xFFE57373)
-                    else -> if (delta > 0) Color(0xFF4CAF50) else Color(0xFFE57373)
-                }
-                Text(
-                    text = "$sign${"%.1f".format(delta)} $unit",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = color
-                )
+private fun SleepSummaryTile(sleepLogs: List<SleepLog>, onClick: () -> Unit) {
+    val latest = sleepLogs.firstOrNull()
+    SummaryTile(
+        title = "Sleep",
+        value = latest?.let { formatDuration(it.durationMinutes) },
+        subtitle = latest?.let { log ->
+            buildString {
+                log.sleepScore?.let { append("Score $it") }
+                if (log.sleepScore != null) append(" · ")
+                append(log.date.toString())
             }
-        }
-    }
+        },
+        icon = Icons.Default.Bedtime,
+        accent = SleepColor,
+        onClick = onClick,
+        emptyMessage = "No sleep data yet — sync Health Connect"
+    )
 }
 
 @Composable
-private fun EmptyStateCard(onSync: () -> Unit, isSyncing: Boolean) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(Spacing.xl),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(Spacing.md)
-        ) {
-            Text(
-                text = "No body composition data yet",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Text(
-                text = "Connect your Withings scale and tap sync to import your history from Health Connect.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
-            Button(onClick = onSync, enabled = !isSyncing) {
-                if (isSyncing) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    Text("Sync from Health Connect")
-                }
-            }
-        }
-    }
+private fun NutritionSummaryTile(nutritionLogs: List<NutritionLog>, onClick: () -> Unit) {
+    val latest = nutritionLogs.firstOrNull()
+    SummaryTile(
+        title = "Nutrition",
+        value = latest?.energyKcal?.let { "%,.0f kcal".format(it) },
+        subtitle = latest?.let { log ->
+            listOfNotNull(
+                log.proteinG?.let { "P %.0fg".format(it) },
+                if (log.creatineTaken) "Creatine ✓" else null
+            ).joinToString(" · ").ifEmpty { log.date.toString() }
+        },
+        icon = Icons.Default.Restaurant,
+        accent = NutritionColor,
+        onClick = onClick,
+        emptyMessage = "Tap to log calories, protein & creatine"
+    )
+}
+
+internal fun formatDuration(minutes: Int): String {
+    val h = minutes / 60
+    val m = minutes % 60
+    return if (h > 0) "${h}h ${m}m" else "${m}m"
 }

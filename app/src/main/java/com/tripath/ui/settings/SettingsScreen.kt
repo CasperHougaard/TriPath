@@ -485,7 +485,7 @@ private fun HealthConnectCard(
                     ) {
                         Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(Spacing.xs))
-                        Text("View Synced Exercises")
+                        Text("View Synced Health Data")
                     }
 
                     if (syncedWorkoutsCount > 0) {

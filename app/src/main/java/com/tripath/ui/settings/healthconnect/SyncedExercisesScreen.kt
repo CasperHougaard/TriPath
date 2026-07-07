@@ -12,12 +12,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tripath.data.model.WorkoutType
 import com.tripath.ui.theme.Spacing
+import java.time.Duration
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -34,7 +37,20 @@ fun SyncedExercisesScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Synced Exercises") },
+                title = {
+                    Column {
+                        Text("Synced Health Data")
+                        val ignored = uiState.ignoredCount
+                        Text(
+                            text = if (ignored > 0)
+                                "${uiState.dataPoints.size} items · $ignored ignored"
+                            else
+                                "${uiState.dataPoints.size} items",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -50,7 +66,7 @@ fun SyncedExercisesScreen(
         ) {
             if (uiState.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            } else if (uiState.exercises.isEmpty()) {
+            } else if (uiState.dataPoints.isEmpty()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -66,7 +82,7 @@ fun SyncedExercisesScreen(
                     )
                     Spacer(modifier = Modifier.height(Spacing.md))
                     Text(
-                        "No exercises found in the last ${uiState.syncDaysBack} days.",
+                        "No synced data yet. Sync from Health Connect to see your exercises, sleep and body measurements here.",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
@@ -79,16 +95,19 @@ fun SyncedExercisesScreen(
                 ) {
                     item {
                         Text(
-                            text = "Showing all exercises from Health Connect in the last ${uiState.syncDaysBack} days. Click on any to see full raw details.",
+                            text = "Everything synced from Health Connect. Turn a data point off to exclude it from analytics, training load and charts — the record is kept and can be turned back on any time.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                             modifier = Modifier.padding(bottom = Spacing.md)
                         )
                     }
-                    items(uiState.exercises) { exercise ->
-                        ExerciseItem(
-                            exercise = exercise,
-                            onClick = { onExerciseClick(exercise.metadata.id) }
+                    items(uiState.dataPoints, key = { it.id }) { point ->
+                        SyncedDataRow(
+                            point = point,
+                            onToggleIgnored = { viewModel.setIgnored(point, !point.isIgnored) },
+                            onClick = if (point is SyncedDataPoint.Exercise) {
+                                { onExerciseClick(point.id) }
+                            } else null
                         )
                     }
                 }
@@ -97,72 +116,111 @@ fun SyncedExercisesScreen(
     }
 }
 
+private val DATE_FORMATTER = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+private val TIME_FORMATTER = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+
 @Composable
-private fun ExerciseItem(
-    exercise: ExerciseSessionRecord,
-    onClick: () -> Unit
+private fun SyncedDataRow(
+    point: SyncedDataPoint,
+    onToggleIgnored: () -> Unit,
+    onClick: (() -> Unit)?
 ) {
-    val startTime = exercise.startTime.atZone(ZoneId.systemDefault())
-    val dateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
-    val timeFormatter = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+    val cardModifier = Modifier
+        .fillMaxWidth()
+        .alpha(if (point.isIgnored) 0.45f else 1f)
+        .let { if (onClick != null) it.clickable(onClick = onClick) else it }
 
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        modifier = cardModifier,
+        colors = CardDefaults.cardColors(
+            containerColor = if (point.isIgnored)
+                MaterialTheme.colorScheme.surfaceVariant
+            else
+                MaterialTheme.colorScheme.surface
+        )
     ) {
         Row(
             modifier = Modifier
                 .padding(Spacing.md)
                 .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = exercise.title ?: getExerciseName(exercise.exerciseType),
+                    text = point.title(),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "${startTime.format(dateFormatter)} at ${startTime.format(timeFormatter)}",
+                    text = point.subtitle(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
+                if (point.isIgnored) {
+                    Text(
+                        text = "Excluded from analytics",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-            
-            Column(horizontalAlignment = Alignment.End) {
-                val duration = java.time.Duration.between(exercise.startTime, exercise.endTime)
-                val hours = duration.toHours()
-                val minutes = duration.toMinutes() % 60
+
+            val metric = point.metric()
+            if (metric != null) {
                 Text(
-                    text = if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m",
+                    text = metric,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium
                 )
-                Text(
-                    text = "ID: ${exercise.metadata.id.take(8)}...",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                )
             }
+
+            Switch(
+                checked = !point.isIgnored,
+                onCheckedChange = { onToggleIgnored() }
+            )
         }
     }
 }
 
-private fun getExerciseName(exerciseType: Int): String {
-    return when (exerciseType) {
-        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING -> "Running"
-        ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL -> "Treadmill Running"
-        ExerciseSessionRecord.EXERCISE_TYPE_BIKING -> "Biking"
-        ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY -> "Stationary Biking"
-        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER -> "Open Water Swimming"
-        ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL -> "Pool Swimming"
-        ExerciseSessionRecord.EXERCISE_TYPE_STRENGTH_TRAINING -> "Strength Training"
-        ExerciseSessionRecord.EXERCISE_TYPE_WALKING -> "Walking"
-        ExerciseSessionRecord.EXERCISE_TYPE_HIKING -> "Hiking"
-        else -> "Exercise (Type $exerciseType)"
+// ---- Row content helpers -------------------------------------------------
+
+private fun SyncedDataPoint.title(): String = when (this) {
+    is SyncedDataPoint.Exercise -> exerciseName(type)
+    is SyncedDataPoint.Sleep -> "Sleep"
+    is SyncedDataPoint.Body -> "Body measurement"
+}
+
+private fun SyncedDataPoint.subtitle(): String {
+    val zoned = Instant.ofEpochMilli(timeMillis).atZone(ZoneId.systemDefault())
+    val date = zoned.format(DATE_FORMATTER)
+    return when (this) {
+        // WorkoutLog only stores the date, so time-of-day would be meaningless.
+        is SyncedDataPoint.Exercise -> date
+        else -> "$date at ${zoned.format(TIME_FORMATTER)}"
     }
 }
 
+private fun SyncedDataPoint.metric(): String? = when (this) {
+    is SyncedDataPoint.Exercise -> formatDuration(durationMinutes)
+    is SyncedDataPoint.Sleep -> formatDuration(durationMinutes)
+    is SyncedDataPoint.Body -> log.weightKg?.let { "%.1f kg".format(it) }
+        ?: log.bodyFatPercent?.let { "%.1f%%".format(it) }
+}
+
+private fun formatDuration(totalMinutes: Int): String {
+    val duration = Duration.ofMinutes(totalMinutes.toLong())
+    val hours = duration.toHours()
+    val minutes = duration.toMinutes() % 60
+    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
+}
+
+private fun exerciseName(type: WorkoutType): String = when (type) {
+    WorkoutType.RUN -> "Running"
+    WorkoutType.BIKE -> "Cycling"
+    WorkoutType.SWIM -> "Swimming"
+    WorkoutType.STRENGTH -> "Strength Training"
+    WorkoutType.WALK -> "Walking"
+    WorkoutType.HIKE -> "Hiking"
+    WorkoutType.OTHER -> "Other Activity"
+}

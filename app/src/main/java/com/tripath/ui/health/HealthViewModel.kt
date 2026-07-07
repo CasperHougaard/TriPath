@@ -3,14 +3,19 @@ package com.tripath.ui.health
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.healthconnect.BodyCompositionSyncResult
 import com.tripath.data.local.healthconnect.HealthConnectManager
+import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.RecoveryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZoneId
@@ -31,10 +36,12 @@ data class HealthUiState(
     val lastSyncResult: BodyCompositionSyncResult? = null,
     val latestWeight: Double? = null,
     val latestFatPercent: Double? = null,
+    val latestFatMassKg: Double? = null,
     val latestLeanMass: Double? = null,
     val latestBoneMass: Double? = null,
     val weightDelta: Double? = null,
     val fatPercentDelta: Double? = null,
+    val fatMassDelta: Double? = null,
     val leanMassDelta: Double? = null,
     val boneMassDelta: Double? = null
 )
@@ -42,7 +49,8 @@ data class HealthUiState(
 @HiltViewModel
 class HealthViewModel @Inject constructor(
     private val recoveryRepository: RecoveryRepository,
-    private val healthConnectManager: HealthConnectManager
+    private val healthConnectManager: HealthConnectManager,
+    private val preferencesManager: PreferencesManager
 ) : ViewModel() {
 
     private val _selectedPeriod = MutableStateFlow(HealthTimePeriod.ONE_MONTH)
@@ -51,6 +59,20 @@ class HealthViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HealthUiState())
     val uiState: StateFlow<HealthUiState> = _uiState.asStateFlow()
+
+    val allLogsForManage: StateFlow<List<BodyCompositionLog>> =
+        recoveryRepository.getAllBodyCompositionLogsIncludingIgnored()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Recent sleep logs (newest first) used to build the summary tile. */
+    val sleepLogs: StateFlow<List<SleepLog>> =
+        recoveryRepository.getSleepLogs()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Recent nutrition logs (newest first) used to build the summary tile. */
+    val nutritionLogs: StateFlow<List<NutritionLog>> =
+        recoveryRepository.getNutritionLogs()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -71,12 +93,45 @@ class HealthViewModel @Inject constructor(
         _selectedPeriod.value = period
     }
 
+    fun toggleIgnored(id: String, isIgnored: Boolean) {
+        viewModelScope.launch {
+            recoveryRepository.setIgnored(id, isIgnored)
+        }
+    }
+
+    /**
+     * Auto-sync when the Health tab is opened, but only if the last sync was more than
+     * [STALE_THRESHOLD_MILLIS] ago (or never). The DB-backed UI stays instant; this just
+     * refreshes in the background. No-ops silently when permissions aren't granted.
+     */
+    fun refreshIfStale() {
+        if (_isSyncing.value) return
+        viewModelScope.launch {
+            val last = preferencesManager.getHealthLastSyncMillis()
+            val now = System.currentTimeMillis()
+            val isStale = last == null || (now - last) > STALE_THRESHOLD_MILLIS
+            if (isStale && healthConnectManager.checkPermissions()) {
+                runSync()
+            }
+        }
+    }
+
+    /** Manual sync triggered by the user — always runs a full sync. */
     fun sync() {
         if (_isSyncing.value) return
         viewModelScope.launch {
-            _isSyncing.value = true
+            runSync()
+        }
+    }
+
+    private suspend fun runSync() {
+        _isSyncing.value = true
+        try {
             val result = healthConnectManager.syncBodyComposition()
             _lastSyncResult.value = result.getOrNull()
+            healthConnectManager.syncSleep()
+            preferencesManager.setHealthLastSyncMillis(System.currentTimeMillis())
+        } finally {
             _isSyncing.value = false
         }
     }
@@ -107,12 +162,18 @@ class HealthViewModel @Inject constructor(
             lastSyncResult = syncResult,
             latestWeight = latest?.weightKg,
             latestFatPercent = latest?.bodyFatPercent,
+            latestFatMassKg = latest?.fatMassKg,
             latestLeanMass = latest?.leanMassKg,
             latestBoneMass = latest?.boneMassKg,
             weightDelta = delta(latest?.weightKg, periodStart?.weightKg),
             fatPercentDelta = delta(latest?.bodyFatPercent, periodStart?.bodyFatPercent),
+            fatMassDelta = delta(latest?.fatMassKg, periodStart?.fatMassKg),
             leanMassDelta = delta(latest?.leanMassKg, periodStart?.leanMassKg),
             boneMassDelta = delta(latest?.boneMassKg, periodStart?.boneMassKg)
         )
+    }
+
+    companion object {
+        private const val STALE_THRESHOLD_MILLIS = 30L * 60L * 1000L // 30 minutes
     }
 }

@@ -45,7 +45,7 @@ class BackupManager @Inject constructor(
     suspend fun exportToJson(): String {
         return withContext(Dispatchers.IO) {
             val trainingPlans = repository.getAllTrainingPlansOnce()
-            val workoutLogs = repository.getAllWorkoutLogsOnce()
+            val workoutLogs = repository.getAllWorkoutLogsOnceIncludingIgnored()
             val rawWorkoutData = repository.getAllRawWorkoutDataOnce()
             val sleepLogs = repository.getAllSleepLogsOnce()
             val specialPeriods = repository.getAllSpecialPeriodsOnce()
@@ -213,7 +213,8 @@ data class WorkoutLogDto(
     val avgPowerWatts: Int?,
     val steps: Int?,
     val hrZoneDistribution: Map<String, Int>? = null,
-    val powerZoneDistribution: Map<String, Int>? = null
+    val powerZoneDistribution: Map<String, Int>? = null,
+    val isIgnored: Boolean = false
 )
 
 /**
@@ -252,7 +253,8 @@ data class SleepLogDto(
     val lightSleepMinutes: Int?,
     val remSleepMinutes: Int?,
     val awakeMinutes: Int?,
-    val importedAt: Long
+    val importedAt: Long,
+    val isIgnored: Boolean = false
 )
 
 /**
@@ -287,7 +289,11 @@ data class UserProfileDto(
     val annualVolumeGoalHours: Float? = null,
     val lthr: Int?,
     val cssSecondsper100m: Int?,
-    val thresholdRunPace: Int?
+    val thresholdRunPace: Int?,
+    val biologicalSex: String? = null,
+    @Serializable(with = LocalDateSerializer::class)
+    val birthDate: LocalDate? = null,
+    val heightCm: Int? = null
 )
 
 // ==================== Entity <-> DTO Conversion Extensions ====================
@@ -329,7 +335,8 @@ private fun WorkoutLog.toDto() = WorkoutLogDto(
     avgPowerWatts = avgPowerWatts,
     steps = steps,
     hrZoneDistribution = hrZoneDistribution,
-    powerZoneDistribution = powerZoneDistribution
+    powerZoneDistribution = powerZoneDistribution,
+    isIgnored = isIgnored
 )
 
 private fun WorkoutLogDto.toEntity() = WorkoutLog(
@@ -345,7 +352,8 @@ private fun WorkoutLogDto.toEntity() = WorkoutLog(
     avgPowerWatts = avgPowerWatts,
     steps = steps,
     hrZoneDistribution = hrZoneDistribution,
-    powerZoneDistribution = powerZoneDistribution
+    powerZoneDistribution = powerZoneDistribution,
+    isIgnored = isIgnored
 )
 
 private fun RawWorkoutData.toDto() = RawWorkoutDataDto(
@@ -390,7 +398,8 @@ private fun SleepLog.toDto() = SleepLogDto(
     lightSleepMinutes = lightSleepMinutes,
     remSleepMinutes = remSleepMinutes,
     awakeMinutes = awakeMinutes,
-    importedAt = importedAt
+    importedAt = importedAt,
+    isIgnored = isIgnored
 )
 
 private fun SleepLogDto.toEntity() = SleepLog(
@@ -405,7 +414,8 @@ private fun SleepLogDto.toEntity() = SleepLog(
     lightSleepMinutes = lightSleepMinutes,
     remSleepMinutes = remSleepMinutes,
     awakeMinutes = awakeMinutes,
-    importedAt = importedAt
+    importedAt = importedAt,
+    isIgnored = isIgnored
 )
 
 private fun SpecialPeriod.toDto() = SpecialPeriodDto(
@@ -435,7 +445,10 @@ private fun UserProfile.toDto() = UserProfileDto(
     annualVolumeGoalHours = annualVolumeGoalHours,
     lthr = lthr,
     cssSecondsper100m = cssSecondsper100m,
-    thresholdRunPace = thresholdRunPace
+    thresholdRunPace = thresholdRunPace,
+    biologicalSex = biologicalSex?.name,
+    birthDate = birthDate,
+    heightCm = heightCm
 )
 
 private fun UserProfileDto.toEntity() = UserProfile(
@@ -449,7 +462,12 @@ private fun UserProfileDto.toEntity() = UserProfile(
     annualVolumeGoalHours = annualVolumeGoalHours,
     lthr = lthr,
     cssSecondsper100m = cssSecondsper100m,
-    thresholdRunPace = thresholdRunPace
+    thresholdRunPace = thresholdRunPace,
+    biologicalSex = biologicalSex?.let {
+        try { com.tripath.data.model.BiologicalSex.valueOf(it) } catch (e: Exception) { null }
+    },
+    birthDate = birthDate,
+    heightCm = heightCm
 )
 
 

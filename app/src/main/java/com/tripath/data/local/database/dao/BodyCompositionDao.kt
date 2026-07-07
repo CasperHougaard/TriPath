@@ -10,10 +10,13 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface BodyCompositionDao {
 
-    @Query("SELECT * FROM body_composition_logs ORDER BY timestamp DESC")
+    @Query("SELECT * FROM body_composition_logs WHERE isIgnored = 0 ORDER BY timestamp DESC")
     fun getAllLogs(): Flow<List<BodyCompositionLog>>
 
-    @Query("SELECT * FROM body_composition_logs WHERE timestamp >= :from AND timestamp <= :to ORDER BY timestamp ASC")
+    @Query("SELECT * FROM body_composition_logs ORDER BY timestamp DESC")
+    fun getAllLogsIncludingIgnored(): Flow<List<BodyCompositionLog>>
+
+    @Query("SELECT * FROM body_composition_logs WHERE isIgnored = 0 AND timestamp >= :from AND timestamp <= :to ORDER BY timestamp ASC")
     suspend fun getLogsInRange(from: Long, to: Long): List<BodyCompositionLog>
 
     @Query("SELECT id FROM body_composition_logs WHERE id IN (:ids)")
@@ -22,6 +25,9 @@ interface BodyCompositionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(logs: List<BodyCompositionLog>)
 
-    @Query("SELECT * FROM body_composition_logs ORDER BY timestamp DESC LIMIT 1")
+    @Query("SELECT * FROM body_composition_logs WHERE isIgnored = 0 ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLatest(): BodyCompositionLog?
+
+    @Query("UPDATE body_composition_logs SET isIgnored = :isIgnored WHERE id = :id")
+    suspend fun updateIgnored(id: String, isIgnored: Boolean)
 }

@@ -51,6 +51,25 @@ data class UserProfile(
     val strengthDays: Int? = 2,
 
     /** Desired distribution of TSS across disciplines */
-    val trainingBalance: TrainingBalance? = TrainingBalance.IRONMAN_BASE
-)
+    val trainingBalance: TrainingBalance? = TrainingBalance.IRONMAN_BASE,
+
+    /** Biological sex — drives sex-specific healthy reference ranges (body-fat %, BMR). */
+    val biologicalSex: BiologicalSex? = null,
+
+    /** Birth date — age is derived from this so reference ranges stay current over time. */
+    val birthDate: LocalDate? = null,
+
+    /** Height in centimetres — needed for BMI and calorie estimates. */
+    val heightCm: Int? = null,
+
+    /** Daily protein target in grams — the primary nutrition goal (soft progress, no pass/fail). */
+    val proteinTargetG: Float? = null,
+
+    /** Optional daily calorie target in kcal — progress only shown when set. */
+    val calorieTarget: Float? = null
+) {
+    /** Age in whole years as of [today], or null when [birthDate] is unset. */
+    fun ageOn(today: LocalDate = LocalDate.now()): Int? =
+        birthDate?.let { java.time.Period.between(it, today).years }
+}
 

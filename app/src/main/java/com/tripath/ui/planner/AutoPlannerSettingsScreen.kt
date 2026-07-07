@@ -19,8 +19,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,13 +33,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +68,7 @@ fun AutoPlannerSettingsScreen(
     val isGenerating by coachViewModel.isGenerating.collectAsStateWithLifecycle()
     val generationError by coachViewModel.generationError.collectAsStateWithLifecycle()
     val generationSuccess by coachViewModel.generationSuccess.collectAsStateWithLifecycle()
+    var showStrengthDatePicker by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -134,6 +141,21 @@ fun AutoPlannerSettingsScreen(
                 }
 
                 SettingsGroupHeader(
+                    title = "Strength Training",
+                    subtitle = "Every 3rd day"
+                )
+
+                StrengthSettingsCard(
+                    isEnabled = uiState.isStrengthEnabled,
+                    firstWorkoutDate = uiState.strengthFirstWorkoutDate,
+                    considersStrength = uiState.runningConsidersStrength,
+                    onEnabledChange = { viewModel.setStrengthEnabled(it) },
+                    onConsidersChange = { viewModel.setRunningConsidersStrength(it) },
+                    onDateClick = { showStrengthDatePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                SettingsGroupHeader(
                     title = "Running Goal",
                     subtitle = "Required for generation"
                 )
@@ -153,6 +175,7 @@ fun AutoPlannerSettingsScreen(
                 AutoPilotGenerationCard(
                     isSmartPlanningEnabled = uiState.isAutoPlannerEnabled,
                     hasActiveRunningGoal = uiState.activeRunningGoal != null,
+                    isStrengthEnabled = uiState.isStrengthEnabled,
                     isGenerating = isGenerating,
                     generationError = generationError,
                     generationSuccess = generationSuccess,
@@ -164,6 +187,40 @@ fun AutoPlannerSettingsScreen(
 
                 Spacer(modifier = Modifier.height(Spacing.xl))
             }
+        }
+    }
+
+    if (showStrengthDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = uiState.strengthFirstWorkoutDate
+                .atStartOfDay(java.time.ZoneId.of("UTC"))
+                .toInstant()
+                .toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showStrengthDatePicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val selectedDate = java.time.Instant.ofEpochMilli(millis)
+                                .atZone(java.time.ZoneId.systemDefault())
+                                .toLocalDate()
+                            viewModel.setStrengthFirstWorkoutDate(selectedDate)
+                        }
+                        showStrengthDatePicker = false
+                    }
+                ) {
+                    Text("Set")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStrengthDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
         }
     }
 }
@@ -195,6 +252,7 @@ private fun SettingsGroupHeader(
 fun AutoPilotGenerationCard(
     isSmartPlanningEnabled: Boolean,
     hasActiveRunningGoal: Boolean,
+    isStrengthEnabled: Boolean,
     isGenerating: Boolean,
     generationError: String?,
     generationSuccess: Int?,
@@ -205,7 +263,8 @@ fun AutoPilotGenerationCard(
 ) {
     val monthOptions = listOf(1, 2, 3, 4, 5, 6)
     var selectedMonths by remember { mutableIntStateOf(3) }
-    val canGenerate = !isGenerating && isSmartPlanningEnabled && hasActiveRunningGoal
+    val canGenerate = !isGenerating && isSmartPlanningEnabled &&
+        (hasActiveRunningGoal || isStrengthEnabled)
 
     Card(
         modifier = modifier,
@@ -226,8 +285,9 @@ fun AutoPilotGenerationCard(
             Text(
                 text = when {
                     !isSmartPlanningEnabled -> "Enable Smart Planning to generate a plan."
-                    hasActiveRunningGoal -> "Generate a running plan from the saved goal."
-                    else -> "A running goal is required before generation."
+                    hasActiveRunningGoal -> "Generate your plan from the saved goal and settings."
+                    isStrengthEnabled -> "Generate a strength-only plan. Add a running goal to include runs."
+                    else -> "Add a running goal or enable strength training before generation."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
@@ -274,8 +334,8 @@ fun AutoPilotGenerationCard(
                     Text(
                         when {
                             !isSmartPlanningEnabled -> "Turn On Smart Planning First"
-                            !hasActiveRunningGoal -> "Create Running Goal First"
-                            else -> "Generate ${selectedMonths}-Month Running Plan"
+                            !hasActiveRunningGoal && !isStrengthEnabled -> "Create Goal or Enable Strength"
+                            else -> "Generate ${selectedMonths}-Month Plan"
                         }
                     )
                 }
@@ -333,6 +393,107 @@ fun AutoPilotGenerationCard(
                             Text("Dismiss")
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StrengthSettingsCard(
+    isEnabled: Boolean,
+    firstWorkoutDate: java.time.LocalDate,
+    considersStrength: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onConsidersChange: (Boolean) -> Unit,
+    onDateClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val formatter = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")
+
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Add Strength Training",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Schedule a 70 min moderate session every 3rd day.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(top = Spacing.xs)
+                    )
+                }
+                Switch(
+                    checked = isEnabled,
+                    onCheckedChange = onEnabledChange
+                )
+            }
+
+            if (isEnabled) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "First workout",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = firstWorkoutDate.format(formatter),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    }
+                    OutlinedButton(onClick = onDateClick) {
+                        Text("Change")
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Consider Strength in Running Plan",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "Never run on a strength day; prefer running the day before.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(top = Spacing.xs)
+                        )
+                    }
+                    Switch(
+                        checked = considersStrength,
+                        onCheckedChange = onConsidersChange
+                    )
                 }
             }
         }

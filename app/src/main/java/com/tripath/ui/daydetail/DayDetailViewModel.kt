@@ -9,6 +9,7 @@ import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.database.util.TemplateSerializer
+import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -32,7 +34,8 @@ data class DayDetailUiState(
 
 @HiltViewModel
 class DayDetailViewModel @Inject constructor(
-    private val repository: TrainingRepository
+    private val repository: TrainingRepository,
+    private val preferencesManager: PreferencesManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DayDetailUiState(date = LocalDate.now()))
@@ -84,6 +87,24 @@ class DayDetailViewModel @Inject constructor(
     fun moveActivityToDate(activity: TrainingPlan, newDate: LocalDate) {
         viewModelScope.launch {
             repository.updateTrainingPlan(activity.copy(date = newDate))
+        }
+    }
+
+    /**
+     * Moves a strength session and slides the rest of the schedule forward to keep the every-3rd-day
+     * cadence: every later strength session shifts by the same delta. When "consider strength" is on,
+     * later runs shift too so they stay the day before their strength session.
+     */
+    fun moveStrengthWithCascade(activity: TrainingPlan, newDate: LocalDate) {
+        viewModelScope.launch {
+            val considerRuns = preferencesManager.runningConsidersStrengthFlow.first()
+            val updates = cascadeStrengthMoveUpdates(
+                activity = activity,
+                newDate = newDate,
+                allPlans = repository.getAllTrainingPlansOnce(),
+                considerRuns = considerRuns
+            )
+            updates.forEach { repository.updateTrainingPlan(it) }
         }
     }
 

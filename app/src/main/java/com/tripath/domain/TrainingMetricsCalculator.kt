@@ -104,6 +104,18 @@ object TrainingMetricsCalculator {
         }
     }
 
+    fun calculateManualTss(type: WorkoutType, durationMinutes: Int, zone: Int): Int {
+        val durationHours = durationMinutes / 60.0
+        val tssPerHour = when (type) {
+            WorkoutType.RUN      -> when (zone) { 1 -> 35.0; 2 -> 55.0; 3 -> 75.0; 4 -> 95.0; 5 -> 115.0; else -> 55.0 }
+            WorkoutType.BIKE     -> when (zone) { 1 -> 30.0; 2 -> 50.0; 3 -> 70.0; 4 -> 90.0; 5 -> 110.0; else -> 50.0 }
+            WorkoutType.SWIM     -> when (zone) { 1 -> 30.0; 2 -> 45.0; 3 -> 60.0; 4 -> 75.0; 5 -> 90.0;  else -> 45.0 }
+            WorkoutType.STRENGTH -> when (zone) { 1 -> 25.0; 2 -> 40.0; 3 -> 55.0; 4 -> 65.0; 5 -> 75.0;  else -> 40.0 }
+            else                 -> when (zone) { 1 -> 20.0; 2 -> 35.0; 3 -> 50.0; 4 -> 65.0; 5 -> 80.0;  else -> 35.0 }
+        }
+        return (durationHours * tssPerHour).toInt()
+    }
+
     /**
      * Estimate hrTSS based on average heart rate and Max HR.
      * Simplified formula: (durationHours) * (avgHr / maxHR)^2 * 100
@@ -194,6 +206,71 @@ object TrainingMetricsCalculator {
         val tsb = ctl - atl
 
         return PerformanceMetrics(ctl = ctl, atl = atl, tsb = tsb)
+    }
+
+    /**
+     * Computes a CTL/ATL/TSB time series across [seriesStart]..[seriesEnd] (inclusive).
+     *
+     * Daily TSS is taken from completed [logs] for dates up to and including [actualUntil].
+     * For dates after [actualUntil] it is taken from [plannedTssByDate] to produce a forward
+     * projection of Fitness (CTL) and Fatigue (ATL) — except that a completed log on a future
+     * date (e.g. a workout manually marked completed ahead of time) takes precedence over the
+     * plan for that same day, so it is never double-counted.
+     *
+     * The EWMA is seeded from the earliest available log so that values for dates up to
+     * [actualUntil] are identical to [calculatePerformanceMetrics] for the same [logs].
+     *
+     * @param logs Completed workout logs (actuals; may include future-dated manual entries).
+     * @param plannedTssByDate Planned daily TSS keyed by date (used for future dates with no completed log).
+     * @param seriesStart First date to emit a data point for.
+     * @param seriesEnd Last date to emit a data point for.
+     * @param actualUntil The boundary between actuals and projection (typically today).
+     * @return Ordered list of (date, metrics) from [seriesStart] to [seriesEnd].
+     */
+    fun calculatePerformanceSeries(
+        logs: List<WorkoutLog>,
+        plannedTssByDate: Map<LocalDate, Int>,
+        seriesStart: LocalDate,
+        seriesEnd: LocalDate,
+        actualUntil: LocalDate
+    ): List<Pair<LocalDate, PerformanceMetrics>> {
+        if (seriesEnd.isBefore(seriesStart)) return emptyList()
+
+        // Actual daily TSS from all completed workouts, including any future-dated manual entries.
+        val actualDailyTSS = aggregateDailyTSS(logs)
+
+        // Seed the EWMA from the earliest log so on-chart actuals match calculatePerformanceMetrics.
+        val earliestLog = logs.minOfOrNull { it.date }
+        val iterationStart = if (earliestLog != null && earliestLog.isBefore(seriesStart)) {
+            earliestLog
+        } else {
+            seriesStart
+        }
+
+        var ctl = 0.0
+        var atl = 0.0
+        val series = mutableListOf<Pair<LocalDate, PerformanceMetrics>>()
+
+        var currentDate = iterationStart
+        while (!currentDate.isAfter(seriesEnd)) {
+            val dayTSS = if (!currentDate.isAfter(actualUntil)) {
+                // Actuals: completed workouts only.
+                actualDailyTSS[currentDate]?.toDouble() ?: 0.0
+            } else {
+                // Projection: a completed log on this future day wins over the plan.
+                (actualDailyTSS[currentDate] ?: plannedTssByDate[currentDate])?.toDouble() ?: 0.0
+            }
+
+            // EWMA: CTL uses the 42-day constant, ATL the 7-day constant.
+            ctl = ctl * (1.0 - 1.0 / CTL_TIME_CONSTANT) + dayTSS * (1.0 / CTL_TIME_CONSTANT)
+            atl = atl * (1.0 - 1.0 / ATL_TIME_CONSTANT) + dayTSS * (1.0 / ATL_TIME_CONSTANT)
+
+            if (!currentDate.isBefore(seriesStart)) {
+                series.add(currentDate to PerformanceMetrics(ctl = ctl, atl = atl, tsb = ctl - atl))
+            }
+            currentDate = currentDate.plusDays(1)
+        }
+        return series
     }
 
     /**

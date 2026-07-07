@@ -9,6 +9,7 @@ import com.tripath.data.local.database.converters.Converters
 import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.NutritionLogDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
@@ -19,6 +20,7 @@ import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.DailyWellnessLog
+import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.RawWorkoutData
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
@@ -44,9 +46,10 @@ import com.tripath.data.local.database.entities.WorkoutLog
         SleepLog::class,
         DailyWellnessLog::class,
         WellnessTaskDefinition::class,
-        BodyCompositionLog::class
+        BodyCompositionLog::class,
+        NutritionLog::class
     ],
-    version = 15,
+    version = 19,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -61,6 +64,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sleepLogDao(): SleepLogDao
     abstract fun wellnessDao(): WellnessDao
     abstract fun bodyCompositionDao(): BodyCompositionDao
+    abstract fun nutritionLogDao(): NutritionLogDao
 
     companion object {
         const val DATABASE_NAME = "tripath_database"

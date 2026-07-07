@@ -25,16 +25,29 @@ data class WorkoutTypeTssAverage(
 interface WorkoutLogDao {
 
     /**
-     * Get all workout logs ordered by date (newest first).
+     * Get all non-ignored workout logs ordered by date (newest first).
+     * Ignored workouts are excluded from all analytics/training-load consumers.
      */
-    @Query("SELECT * FROM workout_logs ORDER BY date DESC")
+    @Query("SELECT * FROM workout_logs WHERE isIgnored = 0 ORDER BY date DESC")
     fun getAll(): Flow<List<WorkoutLog>>
 
     /**
-     * Get all workout logs as a one-shot list (for backup).
+     * Get ALL workout logs including ignored ones (for the synced-data management list).
      */
     @Query("SELECT * FROM workout_logs ORDER BY date DESC")
+    fun getAllIncludingIgnored(): Flow<List<WorkoutLog>>
+
+    /**
+     * Get all non-ignored workout logs as a one-shot list (for analytics).
+     */
+    @Query("SELECT * FROM workout_logs WHERE isIgnored = 0 ORDER BY date DESC")
     suspend fun getAllOnce(): List<WorkoutLog>
+
+    /**
+     * Get ALL workout logs including ignored ones as a one-shot list (for backup).
+     */
+    @Query("SELECT * FROM workout_logs ORDER BY date DESC")
+    suspend fun getAllOnceIncludingIgnored(): List<WorkoutLog>
 
     /**
      * Get a workout log by its Health Connect ID.
@@ -45,19 +58,19 @@ interface WorkoutLogDao {
     /**
      * Get workout logs within a date range.
      */
-    @Query("SELECT * FROM workout_logs WHERE date >= :startDate AND date <= :endDate ORDER BY date DESC")
+    @Query("SELECT * FROM workout_logs WHERE isIgnored = 0 AND date >= :startDate AND date <= :endDate ORDER BY date DESC")
     fun getByDateRange(startDate: Long, endDate: Long): Flow<List<WorkoutLog>>
 
     /**
      * Get workout logs by workout type.
      */
-    @Query("SELECT * FROM workout_logs WHERE type = :type ORDER BY date DESC")
+    @Query("SELECT * FROM workout_logs WHERE isIgnored = 0 AND type = :type ORDER BY date DESC")
     fun getByType(type: WorkoutType): Flow<List<WorkoutLog>>
 
     /**
      * Get workout logs for a specific date.
      */
-    @Query("SELECT * FROM workout_logs WHERE date = :date ORDER BY connectId ASC")
+    @Query("SELECT * FROM workout_logs WHERE isIgnored = 0 AND date = :date ORDER BY connectId ASC")
     fun getByDate(date: Long): Flow<List<WorkoutLog>>
 
     /**
@@ -113,10 +126,17 @@ interface WorkoutLogDao {
     @Query("""
         SELECT type, (SUM(computedTSS) / 4) as averageWeeklyTss
         FROM workout_logs
-        WHERE date >= :startDate AND date <= :endDate 
+        WHERE date >= :startDate AND date <= :endDate
           AND computedTSS IS NOT NULL
+          AND isIgnored = 0
         GROUP BY type
     """)
     suspend fun getAverageWeeklyTssPerType(startDate: Long, endDate: Long): List<WorkoutTypeTssAverage>
+
+    /**
+     * Toggle whether a workout is ignored (excluded from analytics/training-load).
+     */
+    @Query("UPDATE workout_logs SET isIgnored = :isIgnored WHERE connectId = :connectId")
+    suspend fun updateIgnored(connectId: String, isIgnored: Boolean)
 }
 

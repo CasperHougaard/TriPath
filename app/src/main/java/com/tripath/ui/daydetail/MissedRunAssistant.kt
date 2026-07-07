@@ -16,15 +16,20 @@ data class MissedRunAssistantState(
     val actions: List<MissedRunAction> = emptyList()
 )
 
+/** Activity types the missed-session assistant can reschedule. */
+private val missedAssistantTypes = setOf(WorkoutType.RUN, WorkoutType.STRENGTH)
+
 fun buildMissedRunAssistantState(
     activity: TrainingPlan,
     completedWorkouts: List<WorkoutLog>,
     today: LocalDate = LocalDate.now()
 ): MissedRunAssistantState {
-    val isEligible = activity.type == WorkoutType.RUN &&
+    // A session counts as "done" when any workout of the same type was logged that day.
+    // Strength durations vary, so we intentionally match on type + date only (no length check).
+    val isEligible = activity.type in missedAssistantTypes &&
         activity.date.isBefore(today) &&
         completedWorkouts.none { workout ->
-            workout.type == WorkoutType.RUN && workout.date == activity.date
+            workout.type == activity.type && workout.date == activity.date
         }
 
     return if (isEligible) {

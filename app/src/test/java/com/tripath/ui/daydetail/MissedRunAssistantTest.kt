@@ -105,6 +105,51 @@ class MissedRunAssistantTest {
     }
 
     @Test
+    fun `past planned strength without same day logged strength is eligible`() {
+        val activity = TrainingPlan(
+            date = today.minusDays(1),
+            type = WorkoutType.STRENGTH,
+            durationMinutes = 70,
+            plannedTSS = 52
+        )
+
+        val state = buildMissedRunAssistantState(
+            activity = activity,
+            completedWorkouts = emptyList(),
+            today = today
+        )
+
+        assertTrue(state.isEligible)
+    }
+
+    @Test
+    fun `logged strength of any duration suppresses missed strength assistant`() {
+        val activity = TrainingPlan(
+            date = today.minusDays(1),
+            type = WorkoutType.STRENGTH,
+            durationMinutes = 70,
+            plannedTSS = 52
+        )
+        val completedWorkouts = listOf(
+            WorkoutLog(
+                connectId = "strength-1",
+                date = activity.date,
+                type = WorkoutType.STRENGTH,
+                durationMinutes = 25, // shorter than planned — still counts as done
+                computedTSS = 20
+            )
+        )
+
+        val state = buildMissedRunAssistantState(
+            activity = activity,
+            completedWorkouts = completedWorkouts,
+            today = today
+        )
+
+        assertFalse(state.isEligible)
+    }
+
+    @Test
     fun `tomorrow action uses next calendar day from current date`() {
         assertEquals(today.plusDays(1), missedRunTomorrowDate(today))
     }

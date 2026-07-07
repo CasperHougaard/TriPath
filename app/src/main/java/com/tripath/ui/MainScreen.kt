@@ -29,7 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import com.tripath.MainActivity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -101,9 +103,23 @@ private fun CustomNavigationBarItem(
 
 @Composable
 fun MainScreen(
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pendingDestination: String? = null,
+    onDestinationHandled: () -> Unit = {}
 ) {
     val navController = rememberNavController()
+
+    // React to an externally requested destination (e.g. tapping the nutrition widget).
+    LaunchedEffect(pendingDestination) {
+        when (pendingDestination) {
+            MainActivity.DEST_NUTRITION -> {
+                navController.navigate(Screen.NutritionDetail.route) {
+                    launchSingleTop = true
+                }
+                onDestinationHandled()
+            }
+        }
+    }
 
     val navigationItems = listOf(
         NavigationItem(Icons.Default.Dashboard, "Dashboard", Screen.Dashboard.route),

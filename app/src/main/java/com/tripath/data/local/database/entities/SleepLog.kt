@@ -52,6 +52,12 @@ data class SleepLog(
     val sleepScore: Int? = null,
     
     /** Timestamp when this record was imported into TriPath database */
-    val importedAt: Long = System.currentTimeMillis()
+    val importedAt: Long = System.currentTimeMillis(),
+
+    /**
+     * When true, this sleep session is excluded from recovery analytics and charts.
+     * The record is kept and can be re-included from the synced-data list.
+     */
+    val isIgnored: Boolean = false
 )
 

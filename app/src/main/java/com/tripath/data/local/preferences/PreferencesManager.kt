@@ -22,6 +22,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.temporal.TemporalAdjusters
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -43,6 +44,7 @@ class PreferencesManager @Inject constructor(
         private val SYNC_DAYS_KEY = intPreferencesKey("sync_days_back")
         private val INCLUDE_IMPORTED_ACTIVITIES_KEY = booleanPreferencesKey("include_imported_activities")
         private val SLEEP_SCORE_BACKFILL_DONE_KEY = booleanPreferencesKey("sleep_score_backfill_done")
+        private val HEALTH_LAST_SYNC_KEY = longPreferencesKey("health_last_sync_millis")
         
         // UserProfile keys
         private val FTP_BIKE_KEY = intPreferencesKey("ftp_bike")
@@ -60,10 +62,20 @@ class PreferencesManager @Inject constructor(
         private val LONG_TRAINING_DAY_KEY = stringPreferencesKey("long_training_day")
         private val STRENGTH_DAYS_KEY = intPreferencesKey("strength_days")
         private val TRAINING_BALANCE_KEY = stringPreferencesKey("training_balance")
+        private val BIOLOGICAL_SEX_KEY = stringPreferencesKey("biological_sex")
+        private val BIRTH_DATE_KEY = longPreferencesKey("birth_date") // epoch day
+        private val HEIGHT_CM_KEY = intPreferencesKey("height_cm")
+        private val PROTEIN_TARGET_G_KEY = floatPreferencesKey("protein_target_g")
+        private val CALORIE_TARGET_KEY = floatPreferencesKey("calorie_target")
         private val ACTIVE_RUNNING_GOAL_KEY = stringPreferencesKey("active_running_goal")
         
         // Planner Auto-planner Settings keys
         private val AUTO_PLANNER_ENABLED_KEY = booleanPreferencesKey("planner_auto_planner_enabled")
+
+        // Auto strength planner keys
+        private val AUTO_PLAN_STRENGTH_ENABLED_KEY = booleanPreferencesKey("auto_plan_strength_enabled")
+        private val RUNNING_CONSIDERS_STRENGTH_KEY = booleanPreferencesKey("running_considers_strength")
+        private val STRENGTH_FIRST_WORKOUT_DATE_KEY = longPreferencesKey("strength_first_workout_date") // epoch day
 
         // Legacy coach planning keys kept for migration from previous versions
         private val LEGACY_IS_SMART_PLANNING_ENABLED_KEY = booleanPreferencesKey("is_smart_planning_enabled")
@@ -171,15 +183,30 @@ class PreferencesManager @Inject constructor(
         val longTrainingDayName = preferences[LONG_TRAINING_DAY_KEY]
         val strengthDays = preferences[STRENGTH_DAYS_KEY]
         val trainingBalanceJson = preferences[TRAINING_BALANCE_KEY]
+        val biologicalSexName = preferences[BIOLOGICAL_SEX_KEY]
+        val birthDateEpochDay = preferences[BIRTH_DATE_KEY]
+        val heightCm = preferences[HEIGHT_CM_KEY]
+        val proteinTargetG = preferences[PROTEIN_TARGET_G_KEY]
+        val calorieTarget = preferences[CALORIE_TARGET_KEY]
 
         // If no fields are set, return null
         if (ftpBike == null && maxHeartRate == null && defaultSwimTSS == null &&
             defaultStrengthHeavyTSS == null && defaultStrengthLightTSS == null &&
             goalDateEpochDay == null && weeklyHoursGoal == null && annualVolumeGoalHours == null && lthr == null &&
             cssSecondsper100m == null && thresholdRunPace == null && weeklyAvailabilityJson == null &&
-            longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null
+            longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null &&
+            biologicalSexName == null && birthDateEpochDay == null && heightCm == null &&
+            proteinTargetG == null && calorieTarget == null
         ) {
             return null
+        }
+
+        val biologicalSex = biologicalSexName?.let {
+            try {
+                com.tripath.data.model.BiologicalSex.valueOf(it)
+            } catch (e: Exception) {
+                null
+            }
         }
 
         val weeklyAvailability = weeklyAvailabilityJson?.let { json ->
@@ -224,7 +251,12 @@ class PreferencesManager @Inject constructor(
             weeklyAvailability = weeklyAvailability,
             longTrainingDay = longTrainingDay,
             strengthDays = strengthDays ?: 2,
-            trainingBalance = trainingBalance
+            trainingBalance = trainingBalance,
+            biologicalSex = biologicalSex,
+            birthDate = birthDateEpochDay?.let { LocalDate.ofEpochDay(it) },
+            heightCm = heightCm,
+            proteinTargetG = proteinTargetG,
+            calorieTarget = calorieTarget
         )
     }
 
@@ -273,6 +305,17 @@ class PreferencesManager @Inject constructor(
             profile.trainingBalance?.let { balance ->
                 preferences[TRAINING_BALANCE_KEY] = Json.encodeToString(balance)
             } ?: preferences.remove(TRAINING_BALANCE_KEY)
+
+            profile.biologicalSex?.let { preferences[BIOLOGICAL_SEX_KEY] = it.name }
+                ?: preferences.remove(BIOLOGICAL_SEX_KEY)
+            profile.birthDate?.let { preferences[BIRTH_DATE_KEY] = it.toEpochDay() }
+                ?: preferences.remove(BIRTH_DATE_KEY)
+            profile.heightCm?.let { preferences[HEIGHT_CM_KEY] = it }
+                ?: preferences.remove(HEIGHT_CM_KEY)
+            profile.proteinTargetG?.let { preferences[PROTEIN_TARGET_G_KEY] = it }
+                ?: preferences.remove(PROTEIN_TARGET_G_KEY)
+            profile.calorieTarget?.let { preferences[CALORIE_TARGET_KEY] = it }
+                ?: preferences.remove(CALORIE_TARGET_KEY)
         }
     }
 
@@ -296,6 +339,11 @@ class PreferencesManager @Inject constructor(
             preferences.remove(LONG_TRAINING_DAY_KEY)
             preferences.remove(STRENGTH_DAYS_KEY)
             preferences.remove(TRAINING_BALANCE_KEY)
+            preferences.remove(BIOLOGICAL_SEX_KEY)
+            preferences.remove(BIRTH_DATE_KEY)
+            preferences.remove(HEIGHT_CM_KEY)
+            preferences.remove(PROTEIN_TARGET_G_KEY)
+            preferences.remove(CALORIE_TARGET_KEY)
         }
     }
 
@@ -353,6 +401,54 @@ class PreferencesManager @Inject constructor(
     // Legacy aliases retained to avoid breaking existing callers during refactor rollout.
     val smartPlanningEnabledFlow: Flow<Boolean> = autoPlannerEnabledFlow
     suspend fun setSmartPlanningEnabled(enabled: Boolean) = setAutoPlannerEnabled(enabled)
+
+    // ==================== Auto Strength Planner Operations ====================
+
+    /** Whether the auto-planner injects strength sessions on an every-3rd-day cadence. */
+    val autoPlanStrengthEnabledFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[AUTO_PLAN_STRENGTH_ENABLED_KEY] ?: false
+    }
+
+    suspend fun setAutoPlanStrengthEnabled(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[AUTO_PLAN_STRENGTH_ENABLED_KEY] = enabled
+        }
+    }
+
+    /** Whether the running plan avoids strength days and prefers the day before them. */
+    val runningConsidersStrengthFlow: Flow<Boolean> = dataStore.data.map { preferences ->
+        preferences[RUNNING_CONSIDERS_STRENGTH_KEY] ?: false
+    }
+
+    suspend fun setRunningConsidersStrength(enabled: Boolean) {
+        dataStore.edit { preferences ->
+            preferences[RUNNING_CONSIDERS_STRENGTH_KEY] = enabled
+        }
+    }
+
+    /**
+     * The date of the first strength session. The every-3rd-day cadence counts from here.
+     * Defaults to the next (or current) Monday when unset.
+     */
+    val strengthFirstWorkoutDateFlow: Flow<LocalDate> = dataStore.data.map { preferences ->
+        preferences[STRENGTH_FIRST_WORKOUT_DATE_KEY]?.let { LocalDate.ofEpochDay(it) }
+            ?: defaultStrengthFirstWorkoutDate()
+    }
+
+    suspend fun getStrengthFirstWorkoutDate(): LocalDate {
+        val preferences = dataStore.data.first()
+        return preferences[STRENGTH_FIRST_WORKOUT_DATE_KEY]?.let { LocalDate.ofEpochDay(it) }
+            ?: defaultStrengthFirstWorkoutDate()
+    }
+
+    suspend fun setStrengthFirstWorkoutDate(date: LocalDate) {
+        dataStore.edit { preferences ->
+            preferences[STRENGTH_FIRST_WORKOUT_DATE_KEY] = date.toEpochDay()
+        }
+    }
+
+    private fun defaultStrengthFirstWorkoutDate(): LocalDate =
+        LocalDate.now().with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
     
     /**
      * Check if sleep score backfill has been completed.
@@ -367,6 +463,23 @@ class PreferencesManager @Inject constructor(
     suspend fun setSleepScoreBackfillDone(done: Boolean = true) {
         dataStore.edit { preferences ->
             preferences[SLEEP_SCORE_BACKFILL_DONE_KEY] = done
+        }
+    }
+
+    /**
+     * Get the timestamp (epoch millis) of the last automatic Health data sync,
+     * or null if a sync has never run. Used to skip auto-sync when data is fresh.
+     */
+    suspend fun getHealthLastSyncMillis(): Long? {
+        return dataStore.data.first()[HEALTH_LAST_SYNC_KEY]
+    }
+
+    /**
+     * Record the timestamp (epoch millis) of the most recent Health data sync.
+     */
+    suspend fun setHealthLastSyncMillis(millis: Long) {
+        dataStore.edit { preferences ->
+            preferences[HEALTH_LAST_SYNC_KEY] = millis
         }
     }
 }

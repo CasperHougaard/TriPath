@@ -2,6 +2,7 @@
 package com.tripath.data.local.repository
 
 import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.SleepLog
 import kotlinx.coroutines.flow.Flow
@@ -34,17 +35,33 @@ interface RecoveryRepository {
     /** Observe a single day's nutrition, or null when nothing is logged for that date. */
     fun getNutritionLog(date: LocalDate): Flow<NutritionLog?>
 
-    /** Atomically add [grams] to a single macro (or kcal) for [date]; other fields untouched. */
-    suspend fun quickAddMacro(date: LocalDate, macro: NutritionMacro, grams: Double)
+    /** Observe the itemised adds behind [date]'s totals, newest first. */
+    fun getNutritionEntries(date: LocalDate): Flow<List<NutritionEntry>>
 
-    /** Atomically add the given amounts together for [date]; null args leave that field alone. */
+    /**
+     * Atomically add [grams] to a single macro (or kcal) for [date]; other fields untouched.
+     * Returns the id of the ledger entry recorded for the add, so it can be undone later.
+     */
+    suspend fun quickAddMacro(date: LocalDate, macro: NutritionMacro, grams: Double): Long
+
+    /**
+     * Atomically add the given amounts together for [date]; null args leave that field alone.
+     * Returns the ledger entry id, or null when every amount was null (nothing was written).
+     */
     suspend fun addNutrition(
         date: LocalDate,
         kcal: Double? = null,
         protein: Double? = null,
         carbs: Double? = null,
-        fat: Double? = null
-    )
+        fat: Double? = null,
+        label: String? = null
+    ): Long?
+
+    /**
+     * Reverse a single logged add: subtracts its deltas from the day's totals and drops it from
+     * the ledger. Safe to call for an id that no longer exists (a double-tapped undo).
+     */
+    suspend fun undoNutritionEntry(entryId: Long)
 
     /** Set absolute values for [date] (edit dialog); blanks/null clear a field. */
     suspend fun setNutritionDay(

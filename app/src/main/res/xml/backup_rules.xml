@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-   Sample backup rules file; customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
+   Auto Backup rules for Android 11 (API 30) and below only. This app's minSdk is 33, so this
+   file is never actually consulted - data_extraction_rules.xml is what takes effect. It is kept
+   because android:fullBackupContent still points here, and mirrors the cloud-backup intent of
+   that file so the two can't drift into saying contradictory things.
 -->
 <full-backup-content>
-    <!-- Exclude database from auto backup since we have our own backup system -->
-    <exclude domain="database" path="tripath_database" />
+    <!-- The database is not uploaded; files/cloud_backup/snapshot.json.gz carries the same data
+         in a smaller, version-tolerant form. See CloudSnapshotStore. -->
+    <exclude domain="database" path="." />
+    <include domain="file" path="cloud_backup/" />
+    <include domain="file" path="datastore/" />
 </full-backup-content>
-

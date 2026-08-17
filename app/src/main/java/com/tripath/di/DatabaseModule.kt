@@ -2,15 +2,18 @@ package com.tripath.di
 
 import android.content.Context
 import androidx.room.Room
+import com.tripath.BuildConfig
 import com.tripath.data.local.database.AppDatabase
 import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
+import com.tripath.data.local.database.dao.WellnessDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
 import com.tripath.data.local.database.migrations.MIGRATION_1_2
 import com.tripath.data.local.database.migrations.MIGRATION_10_11
@@ -22,6 +25,7 @@ import com.tripath.data.local.database.migrations.MIGRATION_15_16
 import com.tripath.data.local.database.migrations.MIGRATION_16_17
 import com.tripath.data.local.database.migrations.MIGRATION_17_18
 import com.tripath.data.local.database.migrations.MIGRATION_18_19
+import com.tripath.data.local.database.migrations.MIGRATION_19_20
 import com.tripath.data.local.database.migrations.MIGRATION_2_3
 import com.tripath.data.local.database.migrations.MIGRATION_3_4
 import com.tripath.data.local.database.migrations.MIGRATION_4_5
@@ -75,9 +79,18 @@ object DatabaseModule {
                 MIGRATION_15_16,
                 MIGRATION_16_17,
                 MIGRATION_17_18,
-                MIGRATION_18_19
+                MIGRATION_18_19,
+                MIGRATION_19_20
             )
-            .fallbackToDestructiveMigration() // Development fallback - allows DB to rebuild if migration fails
+            .apply {
+                // Debug only. In release this fallback would silently delete every workout,
+                // sleep record and body scan the moment a migration was missing — exactly the
+                // data loss the backup system exists to prevent. Without it, a missing
+                // migration crashes loudly in testing instead.
+                if (BuildConfig.DEBUG) {
+                    fallbackToDestructiveMigration()
+                }
+            }
             .build()
     }
 
@@ -133,6 +146,18 @@ object DatabaseModule {
     @Singleton
     fun provideNutritionLogDao(database: AppDatabase): NutritionLogDao {
         return database.nutritionLogDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideNutritionEntryDao(database: AppDatabase): NutritionEntryDao {
+        return database.nutritionEntryDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideWellnessDao(database: AppDatabase): WellnessDao {
+        return database.wellnessDao()
     }
 }
 

@@ -2,12 +2,15 @@ package com.tripath.data.local.preferences
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import com.tripath.data.model.TrainingBalance
@@ -82,6 +85,16 @@ class PreferencesManager @Inject constructor(
         
         /** Default sync period in days */
         const val DEFAULT_SYNC_DAYS = 30
+
+        /**
+         * Preferences that describe *this device's* sync state rather than the user's data.
+         * Carrying them into a backup would make a freshly restored phone believe it had already
+         * synced with Health Connect, so it would skip the first import.
+         */
+        private val TRANSIENT_KEY_NAMES = setOf(
+            "health_last_sync_millis",
+            "sleep_score_backfill_done"
+        )
     }
 
     /**
@@ -480,6 +493,82 @@ class PreferencesManager @Inject constructor(
     suspend fun setHealthLastSyncMillis(millis: Long) {
         dataStore.edit { preferences ->
             preferences[HEALTH_LAST_SYNC_KEY] = millis
+        }
+    }
+
+    // ==================== Backup / Restore Operations ====================
+
+    /**
+     * Export every stored preference as a flat, type-tagged list.
+     *
+     * Reading the DataStore generically (rather than mapping each known key by hand) means
+     * preferences added in the future are backed up automatically, with no risk of a new
+     * setting silently falling out of the backup.
+     *
+     * Device-local sync bookkeeping is deliberately omitted — see [TRANSIENT_KEY_NAMES].
+     */
+    suspend fun exportAll(): List<PreferenceEntry> {
+        val preferences = dataStore.data.first()
+        return preferences.asMap()
+            .filterKeys { it.name !in TRANSIENT_KEY_NAMES }
+            .mapNotNull { (key, value) -> PreferenceEntry.of(key.name, value) }
+            .sortedBy { it.key }
+    }
+
+    /**
+     * Restore preferences produced by [exportAll].
+     *
+     * @param entries the entries to write.
+     * @param replace when true, every preference not present in [entries] is cleared first;
+     *   when false, existing preferences are kept and only the supplied keys are overwritten.
+     * @return the number of entries applied. Entries with an unrecognised type tag are skipped
+     *   rather than failing the whole restore.
+     */
+    suspend fun importAll(entries: List<PreferenceEntry>, replace: Boolean): Int {
+        var applied = 0
+        dataStore.edit { preferences ->
+            if (replace) {
+                // Preserve this device's sync bookkeeping across a replace-all restore, so a
+                // restore doesn't re-trigger work that already ran on this phone.
+                val retained = preferences.asMap()
+                    .filterKeys { it.name in TRANSIENT_KEY_NAMES }
+                    .mapNotNull { (key, value) -> PreferenceEntry.of(key.name, value) }
+                preferences.clear()
+                retained.forEach { applyEntry(preferences, it) }
+            }
+            entries.forEach { entry ->
+                if (entry.key in TRANSIENT_KEY_NAMES) return@forEach
+                if (applyEntry(preferences, entry)) applied++
+            }
+        }
+        return applied
+    }
+
+    private fun applyEntry(preferences: MutablePreferences, entry: PreferenceEntry): Boolean {
+        return when (entry.type) {
+            PreferenceEntry.TYPE_BOOLEAN ->
+                entry.value.toBooleanStrictOrNull()?.let { preferences[booleanPreferencesKey(entry.key)] = it } != null
+            PreferenceEntry.TYPE_INT ->
+                entry.value.toIntOrNull()?.let { preferences[intPreferencesKey(entry.key)] = it } != null
+            PreferenceEntry.TYPE_LONG ->
+                entry.value.toLongOrNull()?.let { preferences[longPreferencesKey(entry.key)] = it } != null
+            PreferenceEntry.TYPE_FLOAT ->
+                entry.value.toFloatOrNull()?.let { preferences[floatPreferencesKey(entry.key)] = it } != null
+            PreferenceEntry.TYPE_DOUBLE ->
+                entry.value.toDoubleOrNull()?.let { preferences[doublePreferencesKey(entry.key)] = it } != null
+            PreferenceEntry.TYPE_STRING -> {
+                preferences[stringPreferencesKey(entry.key)] = entry.value
+                true
+            }
+            PreferenceEntry.TYPE_STRING_SET -> {
+                val decoded = try {
+                    Json.decodeFromString<Set<String>>(entry.value)
+                } catch (e: Exception) {
+                    null
+                }
+                decoded?.let { preferences[stringSetPreferencesKey(entry.key)] = it } != null
+            }
+            else -> false
         }
     }
 }

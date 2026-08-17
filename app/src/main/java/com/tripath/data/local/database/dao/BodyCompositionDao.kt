@@ -16,6 +16,12 @@ interface BodyCompositionDao {
     @Query("SELECT * FROM body_composition_logs ORDER BY timestamp DESC")
     fun getAllLogsIncludingIgnored(): Flow<List<BodyCompositionLog>>
 
+    @Query("SELECT * FROM body_composition_logs ORDER BY timestamp DESC")
+    suspend fun getAllOnce(): List<BodyCompositionLog>
+
+    @Query("SELECT COUNT(*) FROM body_composition_logs")
+    suspend fun getCount(): Int
+
     @Query("SELECT * FROM body_composition_logs WHERE isIgnored = 0 AND timestamp >= :from AND timestamp <= :to ORDER BY timestamp ASC")
     suspend fun getLogsInRange(from: Long, to: Long): List<BodyCompositionLog>
 
@@ -30,4 +36,7 @@ interface BodyCompositionDao {
 
     @Query("UPDATE body_composition_logs SET isIgnored = :isIgnored WHERE id = :id")
     suspend fun updateIgnored(id: String, isIgnored: Boolean)
+
+    @Query("DELETE FROM body_composition_logs")
+    suspend fun deleteAll()
 }

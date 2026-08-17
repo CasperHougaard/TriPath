@@ -55,5 +55,11 @@ interface RawWorkoutDataDao {
      */
     @Query("DELETE FROM raw_workout_data")
     suspend fun deleteAll()
+
+    /**
+     * Number of stored raw sample records.
+     */
+    @Query("SELECT COUNT(*) FROM raw_workout_data")
+    suspend fun getCount(): Int
 }
 

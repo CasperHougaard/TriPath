@@ -36,4 +36,11 @@ data class NutritionLog(
 
     /** Timestamp (epoch millis) when this row was last modified. */
     val updatedAt: Long = System.currentTimeMillis()
-)
+) {
+    /**
+     * True when the row records nothing at all — every macro unlogged and no creatine. Such a row
+     * is indistinguishable from "no data", so it is dropped rather than listed as an empty day.
+     */
+    fun isEmpty(): Boolean =
+        energyKcal == null && proteinG == null && carbsG == null && fatG == null && !creatineTaken
+}

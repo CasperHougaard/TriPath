@@ -4,7 +4,7 @@ import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.backup.BackupManager
-import com.tripath.data.local.backup.ImportSummary
+import com.tripath.data.local.backup.CloudSnapshotStore
 import com.tripath.data.model.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.healthconnect.HealthConnectManager
@@ -33,11 +33,8 @@ enum class HealthConnectStatus {
 
 data class SettingsUiState(
     val isLoading: Boolean = false,
-    val exportSuccess: Boolean = false,
-    val importSuccess: Boolean = false,
     val resetSuccess: Boolean = false,
     val errorMessage: String? = null,
-    val importSummary: ImportSummary? = null,
     // Health Connect state
     val healthConnectStatus: HealthConnectStatus = HealthConnectStatus.NOT_AVAILABLE,
     val isSyncing: Boolean = false,
@@ -61,6 +58,7 @@ data class SettingsUiState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val backupManager: BackupManager,
+    private val cloudSnapshotStore: CloudSnapshotStore,
     private val healthConnectManager: HealthConnectManager,
     private val preferencesManager: PreferencesManager,
     private val repository: TrainingRepository,
@@ -180,6 +178,12 @@ class SettingsViewModel @Inject constructor(
                 syncSuccess = overallSuccess,
                 lastSyncDetails = workoutResult.getOrNull()
             )
+
+            // A sync is when most new data arrives, so refresh the file Auto Backup uploads
+            // rather than waiting for the next daily check.
+            if (overallSuccess) {
+                cloudSnapshotStore.writeSnapshot()
+            }
         }
     }
     
@@ -314,77 +318,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Export all data to JSON string.
-     * Should be called before opening the file picker for export.
-     */
-    suspend fun exportData(): Result<String> {
-        return withContext(Dispatchers.IO) {
-            try {
-                _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
-                val jsonString = backupManager.exportToJson()
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    exportSuccess = true,
-                    errorMessage = null
-                )
-                Result.success(jsonString)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    exportSuccess = false,
-                    errorMessage = "Export failed: ${e.message}"
-                )
-                Result.failure(e)
-            }
-        }
-    }
-
-    /**
-     * Import data from JSON string.
-     */
-    fun importData(jsonString: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = true,
-                    errorMessage = null,
-                    importSuccess = false
-                )
-                
-                val result = backupManager.importFromJson(jsonString)
-                
-                result.fold(
-                    onSuccess = { summary ->
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            importSuccess = true,
-                            importSummary = summary,
-                            errorMessage = null
-                        )
-                    },
-                    onFailure = { error ->
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            importSuccess = false,
-                            importSummary = null,
-                            errorMessage = "Import failed: ${error.message}"
-                        )
-                    }
-                )
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    importSuccess = false,
-                    importSummary = null,
-                    errorMessage = "Import failed: ${e.message}"
-                )
-            }
-        }
-    }
-
-    /**
      * Reset all data in the database.
-     * This will delete all training plans, workout logs, special periods, and user profile.
+     * This will delete every table plus the stored user profile.
+     *
+     * Export and import moved to the My Data screen
+     * ([com.tripath.ui.data.MyDataViewModel]), which owns the full backup flow.
      */
     fun resetData() {
         viewModelScope.launch {
@@ -427,11 +365,8 @@ class SettingsViewModel @Inject constructor(
      */
     fun clearMessages() {
         _uiState.value = _uiState.value.copy(
-            exportSuccess = false,
-            importSuccess = false,
             resetSuccess = false,
             errorMessage = null,
-            importSummary = null,
             lastSyncResult = null,
             syncSuccess = null,
             profileSaveSuccess = false,

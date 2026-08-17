@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.core.view.WindowCompat
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.lifecycleScope
+import com.tripath.data.local.backup.CloudSnapshotStore
 import com.tripath.data.local.healthconnect.HealthConnectManager
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.ui.MainScreen
@@ -34,6 +35,9 @@ class MainActivity : ComponentActivity() {
     
     @Inject
     lateinit var preferencesManager: PreferencesManager
+
+    @Inject
+    lateinit var cloudSnapshotStore: CloudSnapshotStore
 
     private val permissionLauncher = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -119,6 +123,11 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         lifecycleScope.launch { refreshNutritionWidget(applicationContext) }
+
+        // Leaving the app is the natural point to capture what was just logged. Without this the
+        // cloud snapshot could trail the database by up to a day, and a restore would quietly
+        // come back missing that day's entries.
+        cloudSnapshotStore.refreshInBackground()
     }
 
     /**

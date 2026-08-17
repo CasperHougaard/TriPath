@@ -47,6 +47,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Needed so DatabaseModule can gate the destructive-migration fallback to debug builds.
+        buildConfig = true
     }
 }
 
@@ -104,6 +106,10 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+    // In-memory Room + coroutine test support, for verifying backup restore against a real
+    // database without touching the installed app's data.
+    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)

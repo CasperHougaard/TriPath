@@ -1,36 +1,44 @@
 package com.tripath.data.local.backup
 
-import com.tripath.data.local.database.AppDatabase
-import com.tripath.data.local.database.entities.DayTemplate
-import com.tripath.data.local.database.entities.RawWorkoutData
-import com.tripath.data.local.database.entities.SleepLog
-import com.tripath.data.local.database.entities.SpecialPeriod
-import com.tripath.data.local.database.entities.SpecialPeriodType
-import com.tripath.data.local.database.entities.TrainingPlan
-import com.tripath.data.local.database.entities.WorkoutLog
-import com.tripath.data.model.UserProfile
-import com.tripath.data.local.repository.TrainingRepository
-import com.tripath.data.model.Intensity
-import com.tripath.data.model.StrengthFocus
-import com.tripath.data.model.WorkoutType
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
+import android.content.Context
 import androidx.room.withTransaction
-import kotlinx.serialization.Serializable
+import com.tripath.data.local.database.AppDatabase
+import com.tripath.data.local.database.dao.BodyCompositionDao
+import com.tripath.data.local.database.dao.DayNoteDao
+import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.NutritionEntryDao
+import com.tripath.data.local.database.dao.NutritionLogDao
+import com.tripath.data.local.database.dao.WellnessDao
+import com.tripath.data.local.preferences.PreferencesManager
+import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.widget.refreshNutritionWidget
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manager for backup and restore operations.
- * Handles exporting and importing all app data as JSON.
+ * Exports and restores the user's complete dataset as JSON.
+ *
+ * This is the single source of truth for "all the user's data": both the manual
+ * export/import in Settings and the cloud snapshot uploaded by Android Auto Backup
+ * ([CloudSnapshotStore]) go through here. See [AppBackupData] for the coverage contract.
  */
 @Singleton
 class BackupManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val repository: TrainingRepository,
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val preferencesManager: PreferencesManager,
+    private val dayNoteDao: DayNoteDao,
+    private val dayTemplateDao: DayTemplateDao,
+    private val wellnessDao: WellnessDao,
+    private val bodyCompositionDao: BodyCompositionDao,
+    private val nutritionLogDao: NutritionLogDao,
+    private val nutritionEntryDao: NutritionEntryDao
 ) {
     private val json = Json {
         prettyPrint = true
@@ -39,101 +47,203 @@ class BackupManager @Inject constructor(
     }
 
     /**
-     * Export all data to a JSON string.
-     * Includes training plans, workout logs, special periods, sleep logs, recovery data, and user profile.
+     * Compact JSON for the cloud snapshot — pretty-printing a file nobody reads by hand
+     * just burns quota.
      */
-    suspend fun exportToJson(): String {
-        return withContext(Dispatchers.IO) {
-            val trainingPlans = repository.getAllTrainingPlansOnce()
-            val workoutLogs = repository.getAllWorkoutLogsOnceIncludingIgnored()
-            val rawWorkoutData = repository.getAllRawWorkoutDataOnce()
-            val sleepLogs = repository.getAllSleepLogsOnce()
-            val specialPeriods = repository.getAllSpecialPeriodsOnce()
-            val userProfile = repository.getUserProfileOnce()
+    private val compactJson = Json {
+        prettyPrint = false
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
 
-            val backupData = AppBackupData(
+    /**
+     * Collect every table and preference into a backup structure.
+     *
+     * Reads happen inside a single transaction so the snapshot is a consistent point-in-time
+     * view rather than a set of tables read at slightly different moments.
+     */
+    suspend fun exportToBackupData(
+        appVersionCode: Long? = null,
+        appVersionName: String? = null
+    ): AppBackupData = withContext(Dispatchers.IO) {
+        // Preferences live in DataStore, outside the Room transaction.
+        val preferences = preferencesManager.exportAll().map { it.toDto() }
+
+        database.withTransaction {
+            AppBackupData(
                 version = BACKUP_VERSION,
                 timestamp = System.currentTimeMillis(),
-                trainingPlans = trainingPlans.map { it.toDto() },
-                workoutLogs = workoutLogs.map { it.toDto() },
-                rawWorkoutData = rawWorkoutData.map { it.toDto() },
-                sleepLogs = sleepLogs.map { it.toDto() },
-                specialPeriods = specialPeriods.map { it.toDto() },
-                userProfile = userProfile?.toDto()
+                appVersionCode = appVersionCode,
+                appVersionName = appVersionName,
+                trainingPlans = repository.getAllTrainingPlansOnce().map { it.toDto() },
+                workoutLogs = repository.getAllWorkoutLogsOnceIncludingIgnored().map { it.toDto() },
+                rawWorkoutData = repository.getAllRawWorkoutDataOnce().map { it.toDto() },
+                sleepLogs = repository.getAllSleepLogsOnce().map { it.toDto() },
+                specialPeriods = repository.getAllSpecialPeriodsOnce().map { it.toDto() },
+                dayNotes = dayNoteDao.getAllOnce().map { it.toDto() },
+                dayTemplates = dayTemplateDao.getAllOnce().map { it.toDto() },
+                wellnessLogs = wellnessDao.getAllLogsOnce().map { it.toDto() },
+                wellnessTasks = wellnessDao.getAllTasksOnce().map { it.toDto() },
+                bodyCompositionLogs = bodyCompositionDao.getAllOnce().map { it.toDto() },
+                nutritionLogs = nutritionLogDao.getAllOnce().map { it.toDto() },
+                nutritionEntries = nutritionEntryDao.getAllOnce().map { it.toDto() },
+                preferences = preferences,
+                // Version 5+ carries the profile inside `preferences`.
+                userProfile = null
             )
-
-            json.encodeToString(backupData)
         }
     }
 
     /**
-     * Import data from a JSON string.
-     * This will REPLACE all existing data with the imported data.
-     * 
-     * @param jsonString The JSON backup string to import
-     * @return Result indicating success or failure with error details
+     * Export all data as a human-readable JSON string, for the "export to file" flow.
      */
-    suspend fun importFromJson(jsonString: String): Result<ImportSummary> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val backupData = json.decodeFromString<AppBackupData>(jsonString)
+    suspend fun exportToJson(
+        appVersionCode: Long? = null,
+        appVersionName: String? = null
+    ): String = withContext(Dispatchers.IO) {
+        json.encodeToString(exportToBackupData(appVersionCode, appVersionName))
+    }
 
-                // Validate backup version
-                if (backupData.version > BACKUP_VERSION) {
-                    return@withContext Result.failure(
-                        IllegalArgumentException("Backup version ${backupData.version} is newer than supported version $BACKUP_VERSION")
-                    )
-                }
+    /**
+     * Export all data as compact JSON, for the gzipped cloud snapshot.
+     */
+    suspend fun exportToCompactJson(
+        appVersionCode: Long? = null,
+        appVersionName: String? = null
+    ): String = withContext(Dispatchers.IO) {
+        compactJson.encodeToString(exportToBackupData(appVersionCode, appVersionName))
+    }
 
-                // Import all data in a transaction to ensure atomicity
-                val summary = database.withTransaction {
-                    // Clear all existing data
-                    repository.clearAllData()
-
-                    // Import training plans
-                    val trainingPlans = backupData.trainingPlans.map { it.toEntity() }
-                    repository.insertTrainingPlans(trainingPlans)
-
-                    // Import workout logs
-                    val workoutLogs = backupData.workoutLogs.map { it.toEntity() }
-                    repository.insertWorkoutLogs(workoutLogs)
-
-                    // Import raw workout data
-                    val rawWorkoutData = backupData.rawWorkoutData.map { it.toEntity() }
-                    repository.insertRawWorkoutData(rawWorkoutData)
-
-                    // Import sleep logs
-                    val sleepLogs = backupData.sleepLogs.map { it.toEntity() }
-                    repository.insertSleepLogs(sleepLogs)
-
-                    // Import special periods
-                    val specialPeriods = backupData.specialPeriods.map { it.toEntity() }
-                    repository.insertSpecialPeriods(specialPeriods)
-
-                    // Import user profile
-                    backupData.userProfile?.let { profileDto ->
-                        repository.upsertUserProfile(profileDto.toEntity())
-                    }
-
-                    ImportSummary(
-                        trainingPlansImported = trainingPlans.size,
-                        workoutLogsImported = workoutLogs.size,
-                        rawWorkoutDataImported = rawWorkoutData.size,
-                        sleepLogsImported = sleepLogs.size,
-                        specialPeriodsImported = specialPeriods.size,
-                        profileImported = backupData.userProfile != null
-                    )
-                }
-                
-                Result.success(summary)
-            } catch (e: Exception) {
-                Result.failure(e)
-            }
+    /**
+     * Restore data from a JSON backup string.
+     *
+     * @param jsonString the backup contents.
+     * @param mode [ImportMode.MERGE] keeps records that aren't in the backup;
+     *   [ImportMode.REPLACE_ALL] deletes everything first.
+     */
+    suspend fun importFromJson(
+        jsonString: String,
+        mode: ImportMode = ImportMode.MERGE
+    ): Result<ImportSummary> = withContext(Dispatchers.IO) {
+        try {
+            val backupData = json.decodeFromString<AppBackupData>(jsonString)
+            importBackupData(backupData, mode)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
     /**
-     * Clear all data from the database.
+     * Restore an already-parsed backup.
+     *
+     * The whole restore runs in one transaction: a failure part-way through rolls back rather
+     * than leaving the user with half their data — which matters most in [ImportMode.REPLACE_ALL],
+     * where the delete has already happened.
+     */
+    suspend fun importBackupData(
+        backupData: AppBackupData,
+        mode: ImportMode = ImportMode.MERGE
+    ): Result<ImportSummary> = withContext(Dispatchers.IO) {
+        try {
+            if (backupData.version > BACKUP_VERSION) {
+                return@withContext Result.failure(
+                    IllegalArgumentException(
+                        "This backup was made by a newer version of TriPath " +
+                            "(format ${backupData.version}, this app supports $BACKUP_VERSION). " +
+                            "Update the app and try again."
+                    )
+                )
+            }
+
+            val replace = mode == ImportMode.REPLACE_ALL
+
+            val summary = database.withTransaction {
+                if (replace) {
+                    repository.clearAllData()
+                }
+
+                val trainingPlans = backupData.trainingPlans.map { it.toEntity() }
+                repository.insertTrainingPlans(trainingPlans)
+
+                val workoutLogs = backupData.workoutLogs.map { it.toEntity() }
+                repository.insertWorkoutLogs(workoutLogs)
+
+                val rawWorkoutData = backupData.rawWorkoutData.map { it.toEntity() }
+                repository.insertRawWorkoutData(rawWorkoutData)
+
+                val sleepLogs = backupData.sleepLogs.map { it.toEntity() }
+                repository.insertSleepLogs(sleepLogs)
+
+                val specialPeriods = backupData.specialPeriods.mapNotNull { it.toEntity() }
+                repository.insertSpecialPeriods(specialPeriods)
+
+                val dayNotes = backupData.dayNotes.map { it.toEntity() }
+                dayNoteDao.insertAll(dayNotes)
+
+                val dayTemplates = backupData.dayTemplates.map { it.toEntity() }
+                dayTemplateDao.insertAll(dayTemplates)
+
+                val wellnessLogs = backupData.wellnessLogs.map { it.toEntity() }
+                wellnessLogs.forEach { wellnessDao.insertLog(it) }
+
+                val wellnessTasks = backupData.wellnessTasks.map { it.toEntity() }
+                wellnessDao.insertTasks(wellnessTasks)
+
+                val bodyCompositionLogs = backupData.bodyCompositionLogs.map { it.toEntity() }
+                bodyCompositionDao.insertAll(bodyCompositionLogs)
+
+                val nutritionLogs = backupData.nutritionLogs.map { it.toEntity() }
+                nutritionLogs.forEach { nutritionLogDao.upsert(it) }
+
+                val nutritionEntries = backupData.nutritionEntries.map { it.toEntity() }
+                nutritionEntryDao.insertAll(nutritionEntries)
+
+                ImportSummary(
+                    trainingPlansImported = trainingPlans.size,
+                    workoutLogsImported = workoutLogs.size,
+                    rawWorkoutDataImported = rawWorkoutData.size,
+                    sleepLogsImported = sleepLogs.size,
+                    specialPeriodsImported = specialPeriods.size,
+                    specialPeriodsSkipped = backupData.specialPeriods.size - specialPeriods.size,
+                    dayNotesImported = dayNotes.size,
+                    dayTemplatesImported = dayTemplates.size,
+                    wellnessLogsImported = wellnessLogs.size,
+                    wellnessTasksImported = wellnessTasks.size,
+                    bodyCompositionLogsImported = bodyCompositionLogs.size,
+                    nutritionLogsImported = nutritionLogs.size,
+                    nutritionEntriesImported = nutritionEntries.size,
+                    mode = mode
+                )
+            }
+
+            // Preferences are written after the database transaction commits: DataStore isn't
+            // covered by the Room transaction, so writing them inside it would leave settings
+            // applied even if the record restore rolled back.
+            val preferencesImported = if (backupData.preferences.isNotEmpty()) {
+                preferencesManager.importAll(
+                    entries = backupData.preferences.map { it.toEntry() },
+                    replace = replace
+                )
+            } else {
+                // Backup format <= 4 stored the profile in its own object.
+                backupData.userProfile?.let { profileDto ->
+                    repository.upsertUserProfile(profileDto.toEntity())
+                    1
+                } ?: 0
+            }
+
+            // The home-screen widget reads nutrition straight from the database, so without this
+            // it would keep showing the pre-restore day until the next in-app edit.
+            refreshNutritionWidget(context)
+
+            Result.success(summary.copy(preferencesImported = preferencesImported))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Clear all data from the database and the stored profile.
      */
     suspend fun clearAllData(): Result<Unit> {
         return try {
@@ -144,331 +254,75 @@ class BackupManager @Inject constructor(
         }
     }
 
+    /**
+     * Parse a backup without writing anything, so callers can describe it to the user
+     * (record counts, date) before asking whether to restore.
+     */
+    fun parse(jsonString: String): Result<AppBackupData> =
+        try {
+            Result.success(json.decodeFromString<AppBackupData>(jsonString))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+
     companion object {
-        const val BACKUP_VERSION = 4
+        /**
+         * Backup format version.
+         *
+         * - 4: training plans, workout logs, raw samples, sleep, special periods, profile object.
+         * - 5: adds day notes, day templates, wellness logs and tasks, body composition,
+         *   nutrition, sleep scores, and all preferences (superseding the profile object).
+         *
+         * `nutritionEntries` (the itemised nutrition ledger) was added without a bump: the field
+         * is defaulted and both readers use `ignoreUnknownKeys`, so older installs still restore
+         * these files — whereas version 6 would make them reject the backup outright.
+         */
+        const val BACKUP_VERSION = 5
     }
 }
 
 /**
- * Summary of an import operation.
+ * How an import treats data already on the device.
+ */
+enum class ImportMode {
+    /**
+     * Upsert by primary key. Records present in the backup overwrite their local counterpart;
+     * anything recorded since the backup was taken is left alone. Safe default: importing an
+     * old file can never delete newer data.
+     */
+    MERGE,
+
+    /**
+     * Wipe everything, then restore. Produces an exact copy of the backup, at the cost of
+     * discarding anything logged since it was made.
+     */
+    REPLACE_ALL
+}
+
+/**
+ * Per-table result of an import, so the UI can report what actually landed.
  */
 data class ImportSummary(
-    val trainingPlansImported: Int,
-    val workoutLogsImported: Int,
-    val rawWorkoutDataImported: Int,
-    val sleepLogsImported: Int,
-    val specialPeriodsImported: Int,
-    val profileImported: Boolean
-)
-
-// ==================== Backup Data Transfer Objects ====================
-
-/**
- * Root backup data structure.
- */
-@Serializable
-data class AppBackupData(
-    val version: Int = 4,
-    val timestamp: Long,
-    val trainingPlans: List<TrainingPlanDto>,
-    val workoutLogs: List<WorkoutLogDto>,
-    val rawWorkoutData: List<RawWorkoutDataDto> = emptyList(),
-    val sleepLogs: List<SleepLogDto> = emptyList(),
-    val specialPeriods: List<SpecialPeriodDto> = emptyList(),
-    val userProfile: UserProfileDto?
-)
-
-/**
- * DTO for TrainingPlan serialization.
- */
-@Serializable
-data class TrainingPlanDto(
-    val id: String,
-    @Serializable(with = LocalDateSerializer::class)
-    val date: LocalDate,
-    val type: String,
-    val subType: String?,
-    val durationMinutes: Int,
-    val plannedTSS: Int,
-    val plannedDistanceMeters: Int? = null,
-    val strengthFocus: String?,
-    val intensity: String?
-)
-
-/**
- * DTO for WorkoutLog serialization.
- */
-@Serializable
-data class WorkoutLogDto(
-    val connectId: String,
-    @Serializable(with = LocalDateSerializer::class)
-    val date: LocalDate,
-    val type: String,
-    val durationMinutes: Int,
-    val avgHeartRate: Int?,
-    val calories: Int?,
-    val computedTSS: Int?,
-    val distanceMeters: Double?,
-    val avgSpeedKmh: Double?,
-    val avgPowerWatts: Int?,
-    val steps: Int?,
-    val hrZoneDistribution: Map<String, Int>? = null,
-    val powerZoneDistribution: Map<String, Int>? = null,
-    val isIgnored: Boolean = false
-)
-
-/**
- * DTO for RawWorkoutData serialization.
- */
-@Serializable
-data class RawWorkoutDataDto(
-    val connectId: String,
-    val rawExerciseType: Int,
-    val startTimeMillis: Long,
-    val endTimeMillis: Long,
-    val hrSamplesJson: String?,
-    val powerSamplesJson: String?,
-    val rawCalories: Int?,
-    val rawDistanceMeters: Double?,
-    val rawSteps: Int?,
-    val routeJson: String? = null,
-    val cnsJson: String? = null,
-    val importedAt: Long
-)
-
-/**
- * DTO for SleepLog serialization.
- */
-@Serializable
-data class SleepLogDto(
-    val connectId: String,
-    @Serializable(with = LocalDateSerializer::class)
-    val date: LocalDate,
-    val startTimeMillis: Long,
-    val endTimeMillis: Long,
-    val durationMinutes: Int,
-    val title: String?,
-    val stagesJson: String?,
-    val deepSleepMinutes: Int?,
-    val lightSleepMinutes: Int?,
-    val remSleepMinutes: Int?,
-    val awakeMinutes: Int?,
-    val importedAt: Long,
-    val isIgnored: Boolean = false
-)
-
-/**
- * DTO for SpecialPeriod serialization.
- */
-@Serializable
-data class SpecialPeriodDto(
-    val id: String,
-    val type: String,
-    @Serializable(with = LocalDateSerializer::class)
-    val startDate: LocalDate,
-    @Serializable(with = LocalDateSerializer::class)
-    val endDate: LocalDate,
-    val notes: String?
-)
-
-/**
- * DTO for UserProfile serialization.
- * Note: `id` field is optional for backward compatibility with old backups.
- */
-@Serializable
-data class UserProfileDto(
-    val id: Int? = null, // Optional for backward compatibility, ignored when converting to entity
-    val ftpBike: Int?,
-    val maxHeartRate: Int?,
-    val defaultSwimTSS: Int?,
-    val defaultStrengthHeavyTSS: Int?,
-    val defaultStrengthLightTSS: Int?,
-    @Serializable(with = LocalDateSerializer::class)
-    val goalDate: LocalDate?,
-    val weeklyHoursGoal: Float?,
-    val annualVolumeGoalHours: Float? = null,
-    val lthr: Int?,
-    val cssSecondsper100m: Int?,
-    val thresholdRunPace: Int?,
-    val biologicalSex: String? = null,
-    @Serializable(with = LocalDateSerializer::class)
-    val birthDate: LocalDate? = null,
-    val heightCm: Int? = null
-)
-
-// ==================== Entity <-> DTO Conversion Extensions ====================
-
-fun TrainingPlan.toDto() = TrainingPlanDto(
-    id = id,
-    date = date,
-    type = type.name,
-    subType = subType,
-    durationMinutes = durationMinutes,
-    plannedTSS = plannedTSS,
-    plannedDistanceMeters = plannedDistanceMeters,
-    strengthFocus = strengthFocus?.name,
-    intensity = intensity?.name
-)
-
-fun TrainingPlanDto.toEntity() = TrainingPlan(
-    id = id,
-    date = date,
-    type = WorkoutType.valueOf(type),
-    subType = subType,
-    durationMinutes = durationMinutes,
-    plannedTSS = plannedTSS,
-    plannedDistanceMeters = plannedDistanceMeters,
-    strengthFocus = strengthFocus?.let { StrengthFocus.valueOf(it) },
-    intensity = intensity?.let { Intensity.valueOf(it) }
-)
-
-private fun WorkoutLog.toDto() = WorkoutLogDto(
-    connectId = connectId,
-    date = date,
-    type = type.name,
-    durationMinutes = durationMinutes,
-    avgHeartRate = avgHeartRate,
-    calories = calories,
-    computedTSS = computedTSS,
-    distanceMeters = distanceMeters,
-    avgSpeedKmh = avgSpeedKmh,
-    avgPowerWatts = avgPowerWatts,
-    steps = steps,
-    hrZoneDistribution = hrZoneDistribution,
-    powerZoneDistribution = powerZoneDistribution,
-    isIgnored = isIgnored
-)
-
-private fun WorkoutLogDto.toEntity() = WorkoutLog(
-    connectId = connectId,
-    date = date,
-    type = WorkoutType.valueOf(type),
-    durationMinutes = durationMinutes,
-    avgHeartRate = avgHeartRate,
-    calories = calories,
-    computedTSS = computedTSS,
-    distanceMeters = distanceMeters,
-    avgSpeedKmh = avgSpeedKmh,
-    avgPowerWatts = avgPowerWatts,
-    steps = steps,
-    hrZoneDistribution = hrZoneDistribution,
-    powerZoneDistribution = powerZoneDistribution,
-    isIgnored = isIgnored
-)
-
-private fun RawWorkoutData.toDto() = RawWorkoutDataDto(
-    connectId = connectId,
-    rawExerciseType = rawExerciseType,
-    startTimeMillis = startTimeMillis,
-    endTimeMillis = endTimeMillis,
-    hrSamplesJson = hrSamplesJson,
-    powerSamplesJson = powerSamplesJson,
-    rawCalories = rawCalories,
-    rawDistanceMeters = rawDistanceMeters,
-    rawSteps = rawSteps,
-    routeJson = routeJson,
-    cnsJson = cnsJson,
-    importedAt = importedAt
-)
-
-private fun RawWorkoutDataDto.toEntity() = RawWorkoutData(
-    connectId = connectId,
-    rawExerciseType = rawExerciseType,
-    startTimeMillis = startTimeMillis,
-    endTimeMillis = endTimeMillis,
-    hrSamplesJson = hrSamplesJson,
-    powerSamplesJson = powerSamplesJson,
-    rawCalories = rawCalories,
-    rawDistanceMeters = rawDistanceMeters,
-    rawSteps = rawSteps,
-    routeJson = routeJson,
-    cnsJson = cnsJson,
-    importedAt = importedAt
-)
-
-private fun SleepLog.toDto() = SleepLogDto(
-    connectId = connectId,
-    date = date,
-    startTimeMillis = startTimeMillis,
-    endTimeMillis = endTimeMillis,
-    durationMinutes = durationMinutes,
-    title = title,
-    stagesJson = stagesJson,
-    deepSleepMinutes = deepSleepMinutes,
-    lightSleepMinutes = lightSleepMinutes,
-    remSleepMinutes = remSleepMinutes,
-    awakeMinutes = awakeMinutes,
-    importedAt = importedAt,
-    isIgnored = isIgnored
-)
-
-private fun SleepLogDto.toEntity() = SleepLog(
-    connectId = connectId,
-    date = date,
-    startTimeMillis = startTimeMillis,
-    endTimeMillis = endTimeMillis,
-    durationMinutes = durationMinutes,
-    title = title,
-    stagesJson = stagesJson,
-    deepSleepMinutes = deepSleepMinutes,
-    lightSleepMinutes = lightSleepMinutes,
-    remSleepMinutes = remSleepMinutes,
-    awakeMinutes = awakeMinutes,
-    importedAt = importedAt,
-    isIgnored = isIgnored
-)
-
-private fun SpecialPeriod.toDto() = SpecialPeriodDto(
-    id = id,
-    type = type.name,
-    startDate = startDate,
-    endDate = endDate,
-    notes = notes
-)
-
-private fun SpecialPeriodDto.toEntity() = SpecialPeriod(
-    id = id,
-    type = SpecialPeriodType.valueOf(type),
-    startDate = startDate,
-    endDate = endDate,
-    notes = notes
-)
-
-private fun UserProfile.toDto() = UserProfileDto(
-    ftpBike = ftpBike,
-    maxHeartRate = maxHeartRate,
-    defaultSwimTSS = defaultSwimTSS,
-    defaultStrengthHeavyTSS = defaultStrengthHeavyTSS,
-    defaultStrengthLightTSS = defaultStrengthLightTSS,
-    goalDate = goalDate,
-    weeklyHoursGoal = weeklyHoursGoal,
-    annualVolumeGoalHours = annualVolumeGoalHours,
-    lthr = lthr,
-    cssSecondsper100m = cssSecondsper100m,
-    thresholdRunPace = thresholdRunPace,
-    biologicalSex = biologicalSex?.name,
-    birthDate = birthDate,
-    heightCm = heightCm
-)
-
-private fun UserProfileDto.toEntity() = UserProfile(
-    ftpBike = ftpBike,
-    maxHeartRate = maxHeartRate,
-    defaultSwimTSS = defaultSwimTSS,
-    defaultStrengthHeavyTSS = defaultStrengthHeavyTSS,
-    defaultStrengthLightTSS = defaultStrengthLightTSS,
-    goalDate = goalDate,
-    weeklyHoursGoal = weeklyHoursGoal,
-    annualVolumeGoalHours = annualVolumeGoalHours,
-    lthr = lthr,
-    cssSecondsper100m = cssSecondsper100m,
-    thresholdRunPace = thresholdRunPace,
-    biologicalSex = biologicalSex?.let {
-        try { com.tripath.data.model.BiologicalSex.valueOf(it) } catch (e: Exception) { null }
-    },
-    birthDate = birthDate,
-    heightCm = heightCm
-)
-
-
-
+    val trainingPlansImported: Int = 0,
+    val workoutLogsImported: Int = 0,
+    val rawWorkoutDataImported: Int = 0,
+    val sleepLogsImported: Int = 0,
+    val specialPeriodsImported: Int = 0,
+    val specialPeriodsSkipped: Int = 0,
+    val dayNotesImported: Int = 0,
+    val dayTemplatesImported: Int = 0,
+    val wellnessLogsImported: Int = 0,
+    val wellnessTasksImported: Int = 0,
+    val bodyCompositionLogsImported: Int = 0,
+    val nutritionLogsImported: Int = 0,
+    val nutritionEntriesImported: Int = 0,
+    val preferencesImported: Int = 0,
+    val mode: ImportMode = ImportMode.MERGE
+) {
+    /** Total records written, excluding preferences. */
+    val totalRecords: Int
+        get() = trainingPlansImported + workoutLogsImported + rawWorkoutDataImported +
+            sleepLogsImported + specialPeriodsImported + dayNotesImported +
+            dayTemplatesImported + wellnessLogsImported + wellnessTasksImported +
+            bodyCompositionLogsImported + nutritionLogsImported + nutritionEntriesImported
+}

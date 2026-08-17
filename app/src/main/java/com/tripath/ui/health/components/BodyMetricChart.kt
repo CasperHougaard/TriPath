@@ -83,10 +83,12 @@ fun BodyMetricChart(
         val chartLeft = 0f
         val chartRight = size.width
 
-        fun xOf(index: Int): Float {
-            val fraction = if (dataPoints.size > 1) index.toFloat() / (dataPoints.size - 1) else 0.5f
-            return chartLeft + fraction * (chartRight - chartLeft)
-        }
+        val minTs = dataPoints.minOf { it.first }
+        val maxTs = dataPoints.maxOf { it.first }
+        val tsRange = (maxTs - minTs).coerceAtLeast(1L)
+
+        fun xOf(ts: Long): Float =
+            chartLeft + ((ts - minTs).toFloat() / tsRange) * (chartRight - chartLeft)
 
         fun yOf(value: Double): Float {
             val fraction = ((value - (minVal - padding)) / (range + 2 * padding)).coerceIn(0.0, 1.0)
@@ -115,42 +117,41 @@ fun BodyMetricChart(
             }
         }
 
-        // Draw filled area under the line
+        val rawPoints = dataPoints.map { (ts, value) -> Offset(xOf(ts), yOf(value)) }
+
+        // Draw filled area under the curve
         val fillPath = Path().apply {
-            moveTo(xOf(0), chartBottom)
-            dataPoints.forEachIndexed { index, (_, value) ->
-                lineTo(xOf(index), yOf(value))
-            }
-            lineTo(xOf(dataPoints.lastIndex), chartBottom)
+            moveTo(rawPoints.first().x, chartBottom)
+            lineTo(rawPoints.first().x, rawPoints.first().y)
+            curveThrough(rawPoints)
+            lineTo(rawPoints.last().x, chartBottom)
             close()
         }
         drawPath(fillPath, color = accentColor.copy(alpha = 0.15f))
 
-        // Draw the raw line. De-emphasise it when a smoothed trend sits on top.
+        // Draw the raw curve. De-emphasise it when a smoothed trend sits on top.
         val rawAlpha = if (trend != null) 0.35f else 1f
         val rawWidth = if (trend != null) 1.dp.toPx() else 2.dp.toPx()
         val linePath = Path().apply {
-            dataPoints.forEachIndexed { index, (_, value) ->
-                if (index == 0) moveTo(xOf(0), yOf(value))
-                else lineTo(xOf(index), yOf(value))
-            }
+            moveTo(rawPoints.first().x, rawPoints.first().y)
+            curveThrough(rawPoints)
         }
         drawPath(linePath, color = accentColor.copy(alpha = rawAlpha), style = Stroke(width = rawWidth))
 
-        // Smoothed trend line on top.
+        // Smoothed trend curve on top.
         trend?.let { series ->
+            val trendPoints = series.map { (ts, value) -> Offset(xOf(ts), yOf(value)) }
             val trendPath = Path().apply {
-                series.forEachIndexed { index, (_, value) ->
-                    if (index == 0) moveTo(xOf(0), yOf(value))
-                    else lineTo(xOf(index), yOf(value))
-                }
+                moveTo(trendPoints.first().x, trendPoints.first().y)
+                curveThrough(trendPoints)
             }
             drawPath(trendPath, color = accentColor, style = Stroke(width = 2.5.dp.toPx()))
         }
 
         // Highlight outliers as hollow ringed markers (visible but secondary).
         outlierIndices.filter { it in dataPoints.indices }.forEach { idx ->
-            val center = Offset(xOf(idx), yOf(dataPoints[idx].second))
+            val (ts, value) = dataPoints[idx]
+            val center = Offset(xOf(ts), yOf(value))
             drawCircle(color = Color.White, radius = 4.dp.toPx(), center = center)
             drawCircle(
                 color = accentColor,
@@ -161,25 +162,22 @@ fun BodyMetricChart(
         }
 
         // Draw dot at last point (on the trend endpoint when smoothed).
-        val lastX = xOf(dataPoints.lastIndex)
-        val lastY = yOf((trend ?: dataPoints).last().second)
+        val lastPoint = (trend ?: dataPoints).last()
+        val lastX = xOf(lastPoint.first)
+        val lastY = yOf(lastPoint.second)
         drawCircle(color = accentColor, radius = 4.dp.toPx(), center = Offset(lastX, lastY))
         drawCircle(color = Color.White, radius = 2.dp.toPx(), center = Offset(lastX, lastY))
 
         if (!showLabels) return@Canvas
 
-        // X-axis date labels (up to 4 evenly spaced)
+        // X-axis date labels (up to 4 evenly spaced across the actual time range)
         val labelStyle = TextStyle(fontSize = 10.sp, color = onSurfaceVariant)
-        val labelIndices = when {
-            dataPoints.size <= 4 -> dataPoints.indices.toList()
-            else -> listOf(0, dataPoints.size / 3, 2 * dataPoints.size / 3, dataPoints.lastIndex)
-        }.distinct()
+        val labelTs = listOf(minTs, minTs + tsRange / 3, minTs + 2 * tsRange / 3, maxTs).distinct()
 
-        labelIndices.forEach { idx ->
-            val ts = dataPoints[idx].first
+        labelTs.forEach { ts ->
             val label = Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).format(dateFormatter)
             val measured = textMeasurer.measure(label, labelStyle)
-            val x = (xOf(idx) - measured.size.width / 2).coerceIn(0f, size.width - measured.size.width)
+            val x = (xOf(ts) - measured.size.width / 2).coerceIn(0f, size.width - measured.size.width)
             drawText(measured, topLeft = Offset(x, chartBottom + 4.dp.toPx()))
         }
     }

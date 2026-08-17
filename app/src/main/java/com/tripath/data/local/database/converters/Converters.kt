@@ -1,6 +1,7 @@
 package com.tripath.data.local.database.converters
 
 import androidx.room.TypeConverter
+import com.tripath.data.local.database.entities.NutritionEntryKind
 import com.tripath.data.model.AllergySeverity
 import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
@@ -100,6 +101,17 @@ class Converters {
     @TypeConverter
     fun toTaskTriggerType(name: String?): TaskTriggerType? {
         return parseEnum<TaskTriggerType>(name)
+    }
+
+    // NutritionEntryKind converters
+    @TypeConverter
+    fun fromNutritionEntryKind(kind: NutritionEntryKind?): String? {
+        return kind?.name
+    }
+
+    @TypeConverter
+    fun toNutritionEntryKind(name: String?): NutritionEntryKind? {
+        return parseEnum<NutritionEntryKind>(name)
     }
 
     // List<Long> converters for completedTaskIds

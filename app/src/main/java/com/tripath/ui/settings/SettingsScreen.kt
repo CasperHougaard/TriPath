@@ -1,9 +1,6 @@
 package com.tripath.ui.settings
 
-import android.content.Context
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,14 +19,12 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -54,11 +49,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -71,10 +64,6 @@ import com.tripath.ui.components.SectionHeader
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import java.time.format.DateTimeFormatter
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.io.IOException
 
 @Composable
 fun SettingsScreen(
@@ -83,11 +72,8 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
 
-    val exportJsonState = remember { mutableStateOf<String?>(null) }
     var showResetDialog by remember { mutableStateOf(false) }
 
     val healthConnectPermissionLauncher = rememberLauncherForActivityResult(
@@ -96,63 +82,14 @@ fun SettingsScreen(
         viewModel.onPermissionsResult()
     }
 
-    val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json")
-    ) { uri: Uri? ->
-        uri?.let { exportUri ->
-            exportJsonState.value?.let { jsonString ->
-                coroutineScope.launch {
-                    try {
-                        writeJsonToUri(context, exportUri, jsonString)
-                        snackbarHostState.showSnackbar("Data exported successfully")
-                    } catch (e: Exception) {
-                        snackbarHostState.showSnackbar("Failed to save file: ${e.message}")
-                    }
-                }
-            }
-        }
-        exportJsonState.value = null
-    }
-
-    val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { importUri ->
-            coroutineScope.launch {
-                try {
-                    val jsonString = readJsonFromUri(context, importUri)
-                    viewModel.importData(jsonString)
-                } catch (e: Exception) {
-                    snackbarHostState.showSnackbar("Failed to read file: ${e.message}")
-                }
-            }
-        }
-    }
-
     LaunchedEffect(Unit) {
         viewModel.refreshHealthConnectStatus()
     }
 
-    LaunchedEffect(uiState.importSuccess, uiState.resetSuccess, uiState.errorMessage, uiState.lastSyncResult) {
+    LaunchedEffect(uiState.resetSuccess, uiState.errorMessage, uiState.lastSyncResult) {
         when {
             uiState.resetSuccess -> {
                 snackbarHostState.showSnackbar("All data has been reset")
-                viewModel.clearMessages()
-            }
-            uiState.importSuccess -> {
-                val summary = uiState.importSummary
-                val message = summary?.let {
-                    buildString {
-                        append("Imported ${it.trainingPlansImported} plans, ${it.workoutLogsImported} logs")
-                        if (it.specialPeriodsImported > 0) {
-                            append(", ${it.specialPeriodsImported} special periods")
-                        }
-                        if (it.profileImported) {
-                            append(", and profile")
-                        }
-                    }
-                } ?: "Data imported successfully"
-                snackbarHostState.showSnackbar(message)
                 viewModel.clearMessages()
             }
             uiState.errorMessage != null -> {
@@ -163,19 +100,6 @@ fun SettingsScreen(
                 snackbarHostState.showSnackbar(uiState.lastSyncResult ?: "")
                 viewModel.clearMessages()
             }
-        }
-    }
-
-    fun handleExportClick() {
-        coroutineScope.launch {
-            val result = viewModel.exportData()
-            result.fold(
-                onSuccess = { jsonString ->
-                    exportJsonState.value = jsonString
-                    exportLauncher.launch("tripath_backup.json")
-                },
-                onFailure = { }
-            )
         }
     }
 
@@ -247,16 +171,17 @@ fun SettingsScreen(
                     }
                 )
 
-                // Backup Section
+                // Data & Backup Section
                 SectionHeader(
-                    title = "Backup & Restore",
-                    subtitle = "Export and import your data"
+                    title = "Your Data",
+                    subtitle = "Browse, back up and restore everything"
                 )
 
                 BackupCard(
                     isLoading = uiState.isLoading,
-                    onExportClick = { handleExportClick() },
-                    onImportClick = { importLauncher.launch(arrayOf("application/json")) },
+                    onMyDataClick = {
+                        navController?.navigate(com.tripath.ui.navigation.Screen.MyData.route)
+                    },
                     onResetClick = { showResetDialog = true }
                 )
 
@@ -636,8 +561,7 @@ private fun ProfileCard(
 @Composable
 private fun BackupCard(
     isLoading: Boolean,
-    onExportClick: () -> Unit,
-    onImportClick: () -> Unit,
+    onMyDataClick: () -> Unit,
     onResetClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -652,33 +576,21 @@ private fun BackupCard(
             verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Text(
-                text = "Back up your training plans and workout logs to restore later or transfer to another device.",
+                text = "Your data is included in this phone's Google backup, so it comes back " +
+                    "when you set up a new phone. You can also browse it, export it to a file, " +
+                    "or restore a backup.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
+            Button(
+                onClick = onMyDataClick,
+                enabled = !isLoading,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                OutlinedButton(
-                    onClick = onExportClick,
-                    enabled = !isLoading,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.size(Spacing.xs))
-                    Text("Export")
-                }
-                Button(
-                    onClick = onImportClick,
-                    enabled = !isLoading,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.size(Spacing.xs))
-                    Text("Import")
-                }
+                Icon(Icons.Default.Backup, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.size(Spacing.xs))
+                Text("My Data & Backup")
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.sm))
@@ -696,26 +608,6 @@ private fun BackupCard(
                 Text("Reset All Data")
             }
         }
-    }
-}
-
-private suspend fun writeJsonToUri(context: Context, uri: Uri, jsonString: String) {
-    withContext(Dispatchers.IO) {
-        context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-            outputStream.bufferedWriter().use { writer ->
-                writer.write(jsonString)
-            }
-        } ?: throw IOException("Failed to open output stream for URI: $uri")
-    }
-}
-
-private suspend fun readJsonFromUri(context: Context, uri: Uri): String {
-    return withContext(Dispatchers.IO) {
-        context.contentResolver.openInputStream(uri)?.use { inputStream ->
-            inputStream.bufferedReader().use { reader ->
-                reader.readText()
-            }
-        } ?: throw IOException("Failed to open input stream for URI: $uri")
     }
 }
 

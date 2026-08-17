@@ -1,14 +1,13 @@
 package com.tripath.data.local.database
 
-import android.content.Context
 import androidx.room.Database
-import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.tripath.data.local.database.converters.Converters
 import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
@@ -20,6 +19,7 @@ import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.DailyWellnessLog
+import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.RawWorkoutData
 import com.tripath.data.local.database.entities.SleepLog
@@ -34,6 +34,11 @@ import com.tripath.data.local.database.entities.WorkoutLog
  * Note: User Profile is stored in DataStore Preferences, not in Room.
  * 
  * Migrations are handled explicitly via Migration classes in the migrations package.
+ *
+ * When adding an entity here, also add it to
+ * [com.tripath.data.local.backup.AppBackupData] and to
+ * [com.tripath.data.local.repository.TrainingRepository.clearAllData], or the new table will be
+ * left out of the user's backup and survive a data reset.
  */
 @Database(
     entities = [
@@ -47,9 +52,10 @@ import com.tripath.data.local.database.entities.WorkoutLog
         DailyWellnessLog::class,
         WellnessTaskDefinition::class,
         BodyCompositionLog::class,
-        NutritionLog::class
+        NutritionLog::class,
+        NutritionEntry::class
     ],
-    version = 19,
+    version = 20,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -65,28 +71,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun wellnessDao(): WellnessDao
     abstract fun bodyCompositionDao(): BodyCompositionDao
     abstract fun nutritionLogDao(): NutritionLogDao
+    abstract fun nutritionEntryDao(): NutritionEntryDao
 
     companion object {
         const val DATABASE_NAME = "tripath_database"
-
-        @Volatile
-        private var INSTANCE: AppDatabase? = null
-
-        /**
-         * Get the singleton database instance.
-         * Use Hilt for dependency injection instead of this method when possible.
-         */
-        fun getInstance(context: Context): AppDatabase {
-            return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    AppDatabase::class.java,
-                    DATABASE_NAME
-                ).build()
-                INSTANCE = instance
-                instance
-            }
-        }
     }
 }
 

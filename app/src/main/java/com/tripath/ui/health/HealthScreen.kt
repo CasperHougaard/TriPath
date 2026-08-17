@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.ui.components.SectionHeader
+import com.tripath.ui.health.components.CombinedAnalysisSection
 import com.tripath.ui.health.components.SummaryTile
 import com.tripath.ui.theme.Spacing
 
@@ -41,6 +42,7 @@ fun HealthScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val sleepLogs by viewModel.sleepLogs.collectAsStateWithLifecycle()
     val nutritionLogs by viewModel.nutritionLogs.collectAsStateWithLifecycle()
+    val analysis by viewModel.analysisState.collectAsStateWithLifecycle()
 
     // Auto-read data on open (syncs only if stale / permissions granted).
     LaunchedEffect(Unit) { viewModel.refreshIfStale() }
@@ -65,6 +67,12 @@ fun HealthScreen(
                 BodyScanSummaryTile(state, onNavigateToBodyScanDetail)
                 SleepSummaryTile(sleepLogs, onNavigateToSleepDetail)
                 NutritionSummaryTile(nutritionLogs, onNavigateToNutritionDetail)
+
+                CombinedAnalysisSection(
+                    analysis = analysis,
+                    selectedPeriod = state.selectedPeriod,
+                    onSelectPeriod = viewModel::selectPeriod
+                )
 
                 Spacer(modifier = Modifier.height(Spacing.xl))
             }

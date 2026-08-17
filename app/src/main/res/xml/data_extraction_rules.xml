@@ -1,17 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+   Controls what Android Auto Backup ("Google sikkerhedskopi") uploads to the user's Google
+   account, and what a phone-to-phone transfer copies. Applies to Android 12+ (this app's minSdk
+   is 33, so this file is the only one that takes effect - see backup_rules.xml).
+
+   Cloud backup deliberately skips the Room database and uploads a gzipped JSON snapshot of all
+   app data instead. See CloudSnapshotStore for the reasoning (quota, version tolerance,
+   write consistency).
+
+   The paths below are load-bearing: `cloud_backup/` must match
+   CloudSnapshotStore.SNAPSHOT_DIR, and `datastore/` is where DataStore Preferences keeps the
+   user profile and settings.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- Exclude database files from cloud backup since we have our own backup system -->
+        <!-- The raw SQLite file is not uploaded; files/cloud_backup/snapshot.json.gz carries
+             the same data an order of magnitude smaller and restores through the versioned
+             importer. -->
         <exclude domain="database" path="." />
+
+        <include domain="file" path="cloud_backup/" />
+        <include domain="file" path="datastore/" />
+
+        <!-- Nothing user-owned lives here, and both are regenerated on demand. -->
+        <exclude domain="external" path="." />
+        <exclude domain="sharedpref" path="." />
     </cloud-backup>
+
     <device-transfer>
-        <!-- Include database in device-to-device transfer -->
+        <!-- A working phone-to-phone transfer has no quota worries and lands on the same app
+             version, so copy the database directly: it is faster and needs no restore prompt. -->
         <include domain="database" path="." />
+        <include domain="file" path="." />
     </device-transfer>
 </data-extraction-rules>
-

@@ -27,11 +27,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import com.tripath.MainActivity
+import com.tripath.ui.data.CloudRestorePrompt
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -108,6 +114,8 @@ fun MainScreen(
     onDestinationHandled: () -> Unit = {}
 ) {
     val navController = rememberNavController()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     // React to an externally requested destination (e.g. tapping the nutrition widget).
     LaunchedEffect(pendingDestination) {
@@ -169,6 +177,7 @@ fun MainScreen(
                 }
             }
         },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         modifier = modifier
     ) { paddingValues ->
         TriPathNavigation(
@@ -176,6 +185,14 @@ fun MainScreen(
             modifier = Modifier
                 .padding(paddingValues)
                 .consumeWindowInsets(paddingValues)
+        )
+
+        // Hosted here rather than on a single screen so a restored backup is offered on the first
+        // launch after a device transfer, whichever screen the user lands on.
+        CloudRestorePrompt(
+            onShowMessage = { message ->
+                coroutineScope.launch { snackbarHostState.showSnackbar(message) }
+            }
         )
     }
 }

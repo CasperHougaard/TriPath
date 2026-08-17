@@ -2,6 +2,7 @@ package com.tripath.ui.health.nutrition
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.NutritionMacro
@@ -10,10 +11,13 @@ import com.tripath.data.model.UserProfile
 import com.tripath.domain.health.HealthReference
 import com.tripath.ui.health.HealthTimePeriod
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -60,6 +64,10 @@ class NutritionViewModel @Inject constructor(
 
     private val today: LocalDate = LocalDate.now()
     private val _selectedPeriod = MutableStateFlow(HealthTimePeriod.ONE_MONTH)
+    private val _selectedDay = MutableStateFlow<LocalDate?>(null)
+
+    /** Ledger id of the most recent add, so the Snackbar can undo exactly that one. */
+    private var lastEntryId: Long? = null
 
     val uiState: StateFlow<NutritionUiState> = combine(
         recoveryRepository.getNutritionLogs(),
@@ -94,6 +102,25 @@ class NutritionViewModel @Inject constructor(
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), NutritionUiState())
 
+    /** The day whose itemised log is open, or null when no day sheet is showing. */
+    val selectedDay: StateFlow<LocalDate?> = _selectedDay
+
+    /** Entries of the open day, newest first; empty for days logged before the ledger existed. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val dayEntries: StateFlow<List<NutritionEntry>> = _selectedDay
+        .flatMapLatest { date ->
+            if (date == null) flowOf(emptyList()) else recoveryRepository.getNutritionEntries(date)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun openDay(date: LocalDate) {
+        _selectedDay.value = date
+    }
+
+    fun closeDay() {
+        _selectedDay.value = null
+    }
+
     fun selectPeriod(period: HealthTimePeriod) {
         _selectedPeriod.value = period
     }
@@ -101,15 +128,31 @@ class NutritionViewModel @Inject constructor(
     /** Quick-add a single macro (or kcal) to today, atomically. */
     fun quickAdd(macro: NutritionMacro, grams: Double) {
         viewModelScope.launch {
-            recoveryRepository.quickAddMacro(today, macro, grams)
+            lastEntryId = recoveryRepository.quickAddMacro(today, macro, grams)
         }
     }
 
     /** Custom add: increment several of today's fields at once. Null args leave that field alone. */
-    fun addCustom(kcal: Double?, protein: Double?, carbs: Double?, fat: Double?) {
+    fun addCustom(kcal: Double?, protein: Double?, carbs: Double?, fat: Double?, label: String? = null) {
         viewModelScope.launch {
-            recoveryRepository.addNutrition(today, kcal, protein, carbs, fat)
+            lastEntryId = recoveryRepository.addNutrition(today, kcal, protein, carbs, fat, label)
         }
+    }
+
+    /** Reverse one logged add, subtracting exactly its amounts from the day it belongs to. */
+    fun undoEntry(entryId: Long) {
+        viewModelScope.launch {
+            recoveryRepository.undoNutritionEntry(entryId)
+            if (lastEntryId == entryId) lastEntryId = null
+        }
+    }
+
+    /**
+     * Undo the most recent add made in this session — what the "Added 100 kcal" Snackbar reverses.
+     * Deletes the ledger entry rather than adding a negative one, so the day log stays clean.
+     */
+    fun undoLastEntry() {
+        lastEntryId?.let(::undoEntry)
     }
 
     /** Edit a day to absolute values (blanks clear the field), including the creatine flag. */

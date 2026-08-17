@@ -5,16 +5,23 @@ import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.SleepLog
+import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.healthconnect.BodyCompositionSyncResult
 import com.tripath.data.local.healthconnect.HealthConnectManager
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.RecoveryRepository
+import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.data.model.UserProfile
+import com.tripath.domain.health.CombinedAnalysis
+import com.tripath.domain.health.CombinedAnalytics
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -46,9 +53,19 @@ data class HealthUiState(
     val boneMassDelta: Double? = null
 )
 
+/** Raw streams bundled before the (heterogeneous) period-aware transform builds the analysis. */
+private data class AnalysisInputs(
+    val workouts: List<WorkoutLog>,
+    val nutrition: List<NutritionLog>,
+    val sleep: List<SleepLog>,
+    val bodyComposition: List<BodyCompositionLog>,
+    val profile: UserProfile?
+)
+
 @HiltViewModel
 class HealthViewModel @Inject constructor(
     private val recoveryRepository: RecoveryRepository,
+    private val trainingRepository: TrainingRepository,
     private val healthConnectManager: HealthConnectManager,
     private val preferencesManager: PreferencesManager
 ) : ViewModel() {
@@ -73,6 +90,33 @@ class HealthViewModel @Inject constructor(
     val nutritionLogs: StateFlow<List<NutritionLog>> =
         recoveryRepository.getNutritionLogs()
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
+     * Cross-domain analysis correlating training load, nutrition, weight and sleep over the
+     * currently [selectedPeriod]. Five data streams are bundled first (Flow.combine tops out at
+     * five typed sources) then re-combined with the period so the same chips drive both this and
+     * the body-composition view. The pure [CombinedAnalytics.build] runs off the main thread.
+     */
+    val analysisState: StateFlow<CombinedAnalysis> =
+        combine(
+            trainingRepository.getAllWorkoutLogs(),
+            recoveryRepository.getNutritionLogs(),
+            recoveryRepository.getSleepLogs(),
+            recoveryRepository.getBodyCompositionLogs(),
+            preferencesManager.userProfileFlow
+        ) { workouts, nutrition, sleep, body, profile ->
+            AnalysisInputs(workouts, nutrition, sleep, body, profile)
+        }.combine(_selectedPeriod) { inputs, period ->
+            CombinedAnalytics.build(
+                allWorkouts = inputs.workouts,
+                nutrition = inputs.nutrition,
+                sleep = inputs.sleep,
+                bodyComposition = inputs.bodyComposition,
+                profile = inputs.profile,
+                periodDays = period.days
+            )
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), CombinedAnalysis())
 
     init {
         viewModelScope.launch {

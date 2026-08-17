@@ -101,26 +101,24 @@ fun StackedAreaChart(
             val lower = commonTs.mapIndexed { i, _ -> cumulative[i] }
             val upper = commonTs.mapIndexed { i, ts -> cumulative[i] + valueAt(s, ts) }
 
+            val upperPoints = commonTs.mapIndexed { i, ts -> Offset(xOf(ts), yOf(upper[i])) }
+            val lowerPoints = commonTs.mapIndexed { i, ts -> Offset(xOf(ts), yOf(lower[i])) }
+
             val area = Path().apply {
                 // Up the top edge...
-                commonTs.forEachIndexed { i, ts ->
-                    val x = xOf(ts); val y = yOf(upper[i])
-                    if (i == 0) moveTo(x, y) else lineTo(x, y)
-                }
+                moveTo(upperPoints.first().x, upperPoints.first().y)
+                curveThrough(upperPoints)
                 // ...back along the lower edge.
-                for (i in commonTs.indices.reversed()) {
-                    lineTo(xOf(commonTs[i]), yOf(lower[i]))
-                }
+                lineTo(lowerPoints.last().x, lowerPoints.last().y)
+                curveThrough(lowerPoints.reversed())
                 close()
             }
             drawPath(area, color = s.color.copy(alpha = 0.55f))
 
             // Crisp top border for the layer.
             val border = Path().apply {
-                commonTs.forEachIndexed { i, ts ->
-                    val x = xOf(ts); val y = yOf(upper[i])
-                    if (i == 0) moveTo(x, y) else lineTo(x, y)
-                }
+                moveTo(upperPoints.first().x, upperPoints.first().y)
+                curveThrough(upperPoints)
             }
             drawPath(
                 border,

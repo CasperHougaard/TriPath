@@ -38,5 +38,8 @@ interface SpecialPeriodDao {
     
     @Query("DELETE FROM special_periods")
     suspend fun deleteAll()
+
+    @Query("SELECT COUNT(*) FROM special_periods")
+    suspend fun getCount(): Int
 }
 

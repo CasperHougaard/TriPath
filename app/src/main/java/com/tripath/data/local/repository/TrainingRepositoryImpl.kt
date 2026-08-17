@@ -1,10 +1,14 @@
 package com.tripath.data.local.repository
 
+import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.NutritionEntryDao
+import com.tripath.data.local.database.dao.NutritionLogDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
+import com.tripath.data.local.database.dao.WellnessDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.entities.DayNote
@@ -34,7 +38,11 @@ class TrainingRepositoryImpl @Inject constructor(
     private val preferencesManager: PreferencesManager,
     private val specialPeriodDao: SpecialPeriodDao,
     private val dayNoteDao: DayNoteDao,
-    private val dayTemplateDao: DayTemplateDao
+    private val dayTemplateDao: DayTemplateDao,
+    private val wellnessDao: WellnessDao,
+    private val bodyCompositionDao: BodyCompositionDao,
+    private val nutritionLogDao: NutritionLogDao,
+    private val nutritionEntryDao: NutritionEntryDao
 ) : TrainingRepository {
 
     // ==================== Training Plan Operations ====================
@@ -199,15 +207,29 @@ class TrainingRepositoryImpl @Inject constructor(
 
     // ==================== Bulk Operations ====================
 
+    /**
+     * Wipes every table in the database plus the user profile.
+     *
+     * This must stay exhaustive over [com.tripath.data.local.database.AppDatabase]'s entity list:
+     * a table missed here survives a "Reset all data" and a replace-all restore, leaving stale
+     * health records stitched onto an otherwise fresh dataset.
+     */
     override suspend fun clearAllData() {
         withContext(Dispatchers.IO) {
             trainingPlanDao.deleteAll()
             workoutLogDao.deleteAll()
             rawWorkoutDataDao.deleteAll()
             sleepLogDao.deleteAll()
+            specialPeriodDao.deleteAll()
+            dayNoteDao.deleteAll()
+            dayTemplateDao.deleteAll()
+            wellnessDao.deleteAllLogs()
+            wellnessDao.deleteAllTasks()
+            bodyCompositionDao.deleteAll()
+            nutritionLogDao.deleteAll()
+            nutritionEntryDao.deleteAll()
             // Clear user profile from DataStore
             preferencesManager.deleteUserProfile()
-            specialPeriodDao.deleteAll()
         }
     }
 

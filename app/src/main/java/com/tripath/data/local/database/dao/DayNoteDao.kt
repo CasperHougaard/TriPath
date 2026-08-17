@@ -22,8 +22,20 @@ interface DayNoteDao {
     @Query("SELECT * FROM day_notes WHERE date = :date")
     suspend fun getByDateOnce(date: LocalDate): DayNote?
 
+    @Query("SELECT * FROM day_notes ORDER BY date DESC")
+    fun getAll(): Flow<List<DayNote>>
+
+    @Query("SELECT * FROM day_notes ORDER BY date DESC")
+    suspend fun getAllOnce(): List<DayNote>
+
+    @Query("SELECT COUNT(*) FROM day_notes")
+    suspend fun getCount(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(dayNote: DayNote)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(dayNotes: List<DayNote>)
 
     @Update
     suspend fun update(dayNote: DayNote)
@@ -33,5 +45,8 @@ interface DayNoteDao {
 
     @Query("DELETE FROM day_notes WHERE date = :date")
     suspend fun deleteByDate(date: LocalDate)
+
+    @Query("DELETE FROM day_notes")
+    suspend fun deleteAll()
 }
 

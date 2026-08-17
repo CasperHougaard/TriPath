@@ -9,6 +9,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.tripath.ui.activities.AddManualActivityScreen
 import com.tripath.ui.coach.CoachScreen
+import com.tripath.ui.data.DataCategory
+import com.tripath.ui.data.DataCategoryScreen
+import com.tripath.ui.data.MyDataScreen
 import com.tripath.ui.planner.AutoPlannerSettingsScreen
 import com.tripath.ui.planner.RunningGoalEditorScreen
 import com.tripath.ui.dashboard.DashboardScreen
@@ -42,6 +45,10 @@ sealed class Screen(val route: String) {
         }
     }
     object ProfileEditor : Screen("profile_editor")
+    object MyData : Screen("my_data")
+    object DataCategoryDetail : Screen("data_category/{categoryId}") {
+        fun createRoute(category: DataCategory): String = "data_category/${category.id}"
+    }
     object AutoPlannerSettings : Screen("planner_auto_planner_settings")
     object LegacyPlanningSettings : Screen("planning_settings")
     object RunningGoalEditor : Screen("running_goal_editor")
@@ -123,6 +130,31 @@ fun TriPathNavigation(
         }
         composable(Screen.Settings.route) {
             SettingsScreen(navController = navController)
+        }
+        composable(Screen.MyData.route) {
+            MyDataScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToCategory = { category ->
+                    navController.navigate(Screen.DataCategoryDetail.createRoute(category))
+                }
+            )
+        }
+        composable(
+            route = Screen.DataCategoryDetail.route,
+            arguments = listOf(
+                navArgument("categoryId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val category = DataCategory.fromId(backStackEntry.arguments?.getString("categoryId"))
+            if (category == null) {
+                // Unknown id (e.g. a stale deep link) — nothing to show, so go back.
+                navController.popBackStack()
+            } else {
+                DataCategoryScreen(
+                    category = category,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
         composable(Screen.SyncedExercises.route) {
             com.tripath.ui.settings.healthconnect.SyncedExercisesScreen(

@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
@@ -87,6 +88,8 @@ fun NutritionDetailScreen(
     viewModel: NutritionViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectedDay by viewModel.selectedDay.collectAsStateWithLifecycle()
+    val dayEntries by viewModel.dayEntries.collectAsStateWithLifecycle()
 
     var showCustomAdd by remember { mutableStateOf(false) }
     var showTargets by remember { mutableStateOf(false) }
@@ -95,7 +98,8 @@ fun NutritionDetailScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
-    // Quick-add with a Snackbar "Undo" — reverses the same delta via the same quick-add path.
+    // Quick-add with a Snackbar "Undo" — removes the ledger entry the add just created, so the
+    // day log shows no trace of it (rather than an add and a matching negative).
     fun quickAddWithUndo(macro: NutritionMacro, amount: Double) {
         viewModel.quickAdd(macro, amount)
         val label = when (macro) {
@@ -110,7 +114,7 @@ fun NutritionDetailScreen(
                 duration = SnackbarDuration.Short
             )
             if (result == SnackbarResult.ActionPerformed) {
-                viewModel.quickAdd(macro, -amount)
+                viewModel.undoLastEntry()
             }
         }
     }
@@ -143,6 +147,7 @@ fun NutritionDetailScreen(
                 onCustomAdd = { showCustomAdd = true },
                 onToggleCreatine = { viewModel.setCreatine(state.todayDate, it) },
                 onEditTargets = { showTargets = true },
+                onViewLog = { viewModel.openDay(state.todayDate) },
                 onEditCalories = { newKcal ->
                     val today = state.today
                     viewModel.editDay(state.todayDate, newKcal, today?.proteinG, today?.carbsG, today?.fatG, today?.creatineTaken ?: false)
@@ -176,16 +181,35 @@ fun NutritionDetailScreen(
                     }
                 }
             } else {
-                HistorySection(state = state, onEditDay = { editDay = it })
+                HistorySection(state = state, onOpenDay = { viewModel.openDay(it.date) })
             }
         }
+    }
+
+    selectedDay?.let { date ->
+        // The day's row comes from the list the screen already observes, so the sheet updates
+        // live as entries are undone — including the case where the last one empties the day.
+        val log = if (date == state.todayDate) state.today else state.logs.firstOrNull { it.date == date }
+        NutritionDaySheet(
+            date = date,
+            log = log,
+            entries = dayEntries,
+            isToday = date == state.todayDate,
+            onUndoEntry = { viewModel.undoEntry(it) },
+            onEditTotals = { editDay = log ?: NutritionLog(date = date) },
+            onClearDay = {
+                viewModel.clearDay(date)
+                viewModel.closeDay()
+            },
+            onDismiss = { viewModel.closeDay() }
+        )
     }
 
     if (showCustomAdd) {
         CustomAddDialog(
             onDismiss = { showCustomAdd = false },
-            onConfirm = { kcal, p ->
-                viewModel.addCustom(kcal, p, null, null)
+            onConfirm = { kcal, p, label ->
+                viewModel.addCustom(kcal, p, null, null, label)
                 showCustomAdd = false
             }
         )
@@ -215,6 +239,7 @@ fun NutritionDetailScreen(
             onClear = {
                 viewModel.clearDay(log.date)
                 editDay = null
+                viewModel.closeDay()
             }
         )
     }
@@ -227,6 +252,7 @@ private fun TodayCard(
     onCustomAdd: () -> Unit,
     onToggleCreatine: (Boolean) -> Unit,
     onEditTargets: () -> Unit,
+    onViewLog: () -> Unit,
     onEditCalories: (Double) -> Unit,
     onEditProtein: (Double) -> Unit
 ) {
@@ -239,12 +265,18 @@ private fun TodayCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Today", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                TextButton(onClick = onEditTargets) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text(
-                        text = if (state.userProteinTargetG == null && state.userCalorieTarget == null) "  Set targets" else "  Targets",
-                        style = MaterialTheme.typography.labelLarge
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onViewLog) {
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Text("  Log", style = MaterialTheme.typography.labelLarge)
+                    }
+                    TextButton(onClick = onEditTargets) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = if (state.userProteinTargetG == null && state.userCalorieTarget == null) "  Set targets" else "  Targets",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 }
             }
 
@@ -446,7 +478,7 @@ private fun SoftProgressBar(value: Double, target: Double, color: Color) {
 }
 
 @Composable
-private fun HistorySection(state: NutritionUiState, onEditDay: (NutritionLog) -> Unit) {
+private fun HistorySection(state: NutritionUiState, onOpenDay: (NutritionLog) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
         // Averages
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
@@ -490,8 +522,8 @@ private fun HistorySection(state: NutritionUiState, onEditDay: (NutritionLog) ->
             }
         }
 
-        SectionHeader(title = "Days", subtitle = "${state.logs.size} logged · tap to edit")
-        state.logs.forEach { log -> NutritionDayRow(log, onClick = { onEditDay(log) }) }
+        SectionHeader(title = "Days", subtitle = "${state.logs.size} logged · tap to view")
+        state.logs.forEach { log -> NutritionDayRow(log, onClick = { onOpenDay(log) }) }
     }
 }
 
@@ -557,10 +589,11 @@ private fun NutrientField(label: String, value: String, onValueChange: (String) 
 @Composable
 private fun CustomAddDialog(
     onDismiss: () -> Unit,
-    onConfirm: (kcal: Double?, protein: Double?) -> Unit
+    onConfirm: (kcal: Double?, protein: Double?, label: String?) -> Unit
 ) {
     var kcal by remember { mutableStateOf("") }
     var protein by remember { mutableStateOf("") }
+    var label by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add to today") },
@@ -571,13 +604,21 @@ private fun CustomAddDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                // Names the entry in the day log, which is what makes a wrong one easy to spot.
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("What was it? (optional)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 NutrientField("Calories (kcal)", kcal) { kcal = it }
                 NutrientField("Protein (g)", protein) { protein = it }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onConfirm(kcal.toNutrientOrNull(), protein.toNutrientOrNull())
+                onConfirm(kcal.toNutrientOrNull(), protein.toNutrientOrNull(), label.trim().takeIf { it.isNotEmpty() })
             }) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }

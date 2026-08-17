@@ -80,6 +80,12 @@ interface WellnessDao {
     @Query("DELETE FROM daily_wellness_logs")
     suspend fun deleteAllLogs()
 
+    /**
+     * Number of stored daily wellness logs.
+     */
+    @Query("SELECT COUNT(*) FROM daily_wellness_logs")
+    suspend fun getLogCount(): Int
+
     // WellnessTaskDefinition operations
 
     /**
@@ -135,4 +141,10 @@ interface WellnessDao {
      */
     @Query("DELETE FROM wellness_task_definitions")
     suspend fun deleteAllTasks()
+
+    /**
+     * Number of stored wellness task definitions.
+     */
+    @Query("SELECT COUNT(*) FROM wellness_task_definitions")
+    suspend fun getTaskCount(): Int
 }

@@ -174,6 +174,9 @@ class HealthViewModel @Inject constructor(
             val result = healthConnectManager.syncBodyComposition()
             _lastSyncResult.value = result.getOrNull()
             healthConnectManager.syncSleep()
+            // Whole-day steps, calories and HRV — the non-exercise half of the fuel model.
+            // Failure here is not surfaced: the tab's other data is still worth showing.
+            healthConnectManager.syncDailyActivity()
             preferencesManager.setHealthLastSyncMillis(System.currentTimeMillis())
         } finally {
             _isSyncing.value = false

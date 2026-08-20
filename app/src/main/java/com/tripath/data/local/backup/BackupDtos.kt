@@ -2,6 +2,10 @@ package com.tripath.data.local.backup
 
 import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.DailyWellnessLog
+import com.tripath.data.local.database.entities.DailyActivityLog
+import com.tripath.data.local.database.entities.LiftExerciseCatalogEntry
+import com.tripath.data.local.database.entities.LiftSessionLog
+import com.tripath.data.local.database.entities.LiftSetLog
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.NutritionEntry
@@ -57,6 +61,10 @@ data class AppBackupData(
     val bodyCompositionLogs: List<BodyCompositionLogDto> = emptyList(),
     val nutritionLogs: List<NutritionLogDto> = emptyList(),
     val nutritionEntries: List<NutritionEntryDto> = emptyList(),
+    val dailyActivityLogs: List<DailyActivityLogDto> = emptyList(),
+    val liftSessionLogs: List<LiftSessionLogDto> = emptyList(),
+    val liftSetLogs: List<LiftSetLogDto> = emptyList(),
+    val liftExerciseCatalog: List<LiftExerciseCatalogEntryDto> = emptyList(),
     val preferences: List<PreferenceEntryDto> = emptyList(),
     /**
      * Profile fields as written by backup versions <= 4, when the profile lived in its own DTO
@@ -523,6 +531,154 @@ fun NutritionEntryDto.toEntity() = NutritionEntry(
     prevProteinG = prevProteinG,
     creatineFrom = creatineFrom,
     creatineTo = creatineTo
+)
+
+// ==================== Daily activity (whole-day steps, calories, HRV) ====================
+
+@Serializable
+data class DailyActivityLogDto(
+    @Serializable(with = LocalDateSerializer::class)
+    val date: LocalDate,
+    val steps: Int? = null,
+    val workoutSteps: Int? = null,
+    val activeCaloriesKcal: Double? = null,
+    val totalCaloriesKcal: Double? = null,
+    val hrvRmssd: Double? = null,
+    val importedAt: Long
+)
+
+fun DailyActivityLog.toDto() = DailyActivityLogDto(
+    date = date,
+    steps = steps,
+    workoutSteps = workoutSteps,
+    activeCaloriesKcal = activeCaloriesKcal,
+    totalCaloriesKcal = totalCaloriesKcal,
+    hrvRmssd = hrvRmssd,
+    importedAt = importedAt
+)
+
+fun DailyActivityLogDto.toEntity() = DailyActivityLog(
+    date = date,
+    steps = steps,
+    workoutSteps = workoutSteps,
+    activeCaloriesKcal = activeCaloriesKcal,
+    totalCaloriesKcal = totalCaloriesKcal,
+    hrvRmssd = hrvRmssd,
+    importedAt = importedAt
+)
+
+// ==================== LiftPath sync (sessions, sets, exercise catalog) ====================
+
+@Serializable
+data class LiftSessionLogDto(
+    val id: String,
+    @Serializable(with = LocalDateSerializer::class)
+    val date: LocalDate,
+    val startMillis: Long? = null,
+    val durationSeconds: Long? = null,
+    val planName: String? = null,
+    val dominantIntent: String? = null,
+    val totalSets: Int = 0,
+    val importedAt: Long
+)
+
+fun LiftSessionLog.toDto() = LiftSessionLogDto(
+    id = id,
+    date = date,
+    startMillis = startMillis,
+    durationSeconds = durationSeconds,
+    planName = planName,
+    dominantIntent = dominantIntent,
+    totalSets = totalSets,
+    importedAt = importedAt
+)
+
+fun LiftSessionLogDto.toEntity() = LiftSessionLog(
+    id = id,
+    date = date,
+    startMillis = startMillis,
+    durationSeconds = durationSeconds,
+    planName = planName,
+    dominantIntent = dominantIntent,
+    totalSets = totalSets,
+    importedAt = importedAt
+)
+
+@Serializable
+data class LiftSetLogDto(
+    val sessionId: String,
+    val exerciseId: Int,
+    val setNumber: Int,
+    val kg: Float,
+    val reps: Int,
+    val rpe: Float? = null,
+    val isWarmup: Boolean = false,
+    val intent: String? = null,
+    val durationSeconds: Int? = null,
+    val bodyweightKg: Float? = null
+)
+
+fun LiftSetLog.toDto() = LiftSetLogDto(
+    sessionId = sessionId,
+    exerciseId = exerciseId,
+    setNumber = setNumber,
+    kg = kg,
+    reps = reps,
+    rpe = rpe,
+    isWarmup = isWarmup,
+    intent = intent,
+    durationSeconds = durationSeconds,
+    bodyweightKg = bodyweightKg
+)
+
+fun LiftSetLogDto.toEntity() = LiftSetLog(
+    sessionId = sessionId,
+    exerciseId = exerciseId,
+    setNumber = setNumber,
+    kg = kg,
+    reps = reps,
+    rpe = rpe,
+    isWarmup = isWarmup,
+    intent = intent,
+    durationSeconds = durationSeconds,
+    bodyweightKg = bodyweightKg
+)
+
+@Serializable
+data class LiftExerciseCatalogEntryDto(
+    val id: Int,
+    val name: String,
+    val region: String? = null,
+    val tier: String? = null,
+    val pattern: String? = null,
+    val mechanics: String? = null,
+    val primaryTargets: String = "",
+    val secondaryTargets: String = "",
+    val importedAt: Long
+)
+
+fun LiftExerciseCatalogEntry.toDto() = LiftExerciseCatalogEntryDto(
+    id = id,
+    name = name,
+    region = region,
+    tier = tier,
+    pattern = pattern,
+    mechanics = mechanics,
+    primaryTargets = primaryTargets,
+    secondaryTargets = secondaryTargets,
+    importedAt = importedAt
+)
+
+fun LiftExerciseCatalogEntryDto.toEntity() = LiftExerciseCatalogEntry(
+    id = id,
+    name = name,
+    region = region,
+    tier = tier,
+    pattern = pattern,
+    mechanics = mechanics,
+    primaryTargets = primaryTargets,
+    secondaryTargets = secondaryTargets,
+    importedAt = importedAt
 )
 
 // ==================== Legacy user profile (backup version <= 4) ====================

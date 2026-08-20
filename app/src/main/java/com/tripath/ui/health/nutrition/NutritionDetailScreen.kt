@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -67,10 +68,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.repository.NutritionMacro
+import com.tripath.domain.health.EnergyAvailabilityBand
+import com.tripath.domain.health.EnergyAvailabilityResult
 import com.tripath.ui.components.SectionHeader
 import com.tripath.ui.health.HealthTimePeriod
 import com.tripath.ui.health.components.BodyMetricChart
 import com.tripath.ui.theme.Spacing
+import com.tripath.ui.theme.TriPathTheme
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.launch
@@ -280,6 +284,8 @@ private fun TodayCard(
                 }
             }
 
+            EnergyAvailabilityRow(state.energyAvailability)
+
             // Calories, Protein and Creatine as three equal-weight peers — same tile footprint,
             // so Creatine gets the same visual weight as the two numeric metrics.
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
@@ -323,6 +329,28 @@ private fun TodayCard(
                 Text("  Custom add")
             }
         }
+    }
+}
+
+/**
+ * A soft fuelling-readiness screening signal from [com.tripath.domain.health.EnergyAvailability].
+ * Silent when unknown or adequate — this is meant to be noticed only when it is worth noticing.
+ */
+@Composable
+private fun EnergyAvailabilityRow(result: EnergyAvailabilityResult) {
+    if (result.band == EnergyAvailabilityBand.UNKNOWN || result.band == EnergyAvailabilityBand.ADEQUATE) return
+    val color = when (result.band) {
+        EnergyAvailabilityBand.LOW_SIGNAL -> TriPathTheme.colors.negative
+        EnergyAvailabilityBand.REDUCED -> TriPathTheme.colors.neutral
+        else -> TriPathTheme.colors.positive
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp), tint = color)
+        Text(
+            text = "Energy availability: ${result.band.label} (7-day)",
+            style = MaterialTheme.typography.bodySmall,
+            color = color
+        )
     }
 }
 

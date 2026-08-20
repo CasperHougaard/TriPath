@@ -12,20 +12,26 @@ import androidx.health.connect.client.records.DistanceRecord
 import androidx.health.connect.client.records.ExerciseRoute
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.PowerRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.SpeedRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import com.tripath.data.model.UserProfile
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.database.dao.BodyCompositionDao
+import com.tripath.data.local.database.dao.DailyActivityDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
 import com.tripath.data.local.database.dao.SleepLogDao
+import com.tripath.data.local.database.dao.WellnessDao
+import com.tripath.data.local.database.entities.DailyWellnessLog
 import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.RawWorkoutData
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.preferences.PreferencesManager
@@ -121,6 +127,8 @@ class HealthConnectManager @Inject constructor(
     private val rawWorkoutDataDao: RawWorkoutDataDao,
     private val sleepLogDao: SleepLogDao,
     private val bodyCompositionDao: BodyCompositionDao,
+    private val dailyActivityDao: DailyActivityDao,
+    private val wellnessDao: WellnessDao,
     private val preferencesManager: PreferencesManager
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -138,9 +146,9 @@ class HealthConnectManager @Inject constructor(
     }
 
     /**
-     * Required permissions for reading workout, sleep, and body composition data from Health Connect.
+     * Permissions without which the core sync cannot work. [checkPermissions] gates on these.
      */
-    val permissions = setOf(
+    val requiredPermissions = setOf(
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
         HealthPermission.getReadPermission(HeartRateRecord::class),
         HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
@@ -156,7 +164,24 @@ class HealthConnectManager @Inject constructor(
     )
 
     /**
-     * Check if Health Connect permissions are granted.
+     * Permissions that improve the fuel and readiness model but are not load-bearing.
+     *
+     * Kept out of [requiredPermissions] deliberately. [checkPermissions] demands *every* permission
+     * it knows about, so adding these to that set would flip an existing install — one that granted
+     * everything the previous version asked for — to "not permitted", and silently stop workout,
+     * sleep and body-scan syncing until the user happened to revisit the permission screen. Each
+     * consumer checks for its own optional permission instead and simply produces no data without it.
+     */
+    val optionalPermissions = setOf(
+        HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)
+    )
+
+    /** Everything worth asking for. What the permission request should offer. */
+    val permissions = requiredPermissions + optionalPermissions
+
+    /**
+     * Check if the load-bearing Health Connect permissions are granted.
      */
     suspend fun checkPermissions(): Boolean {
         return try {
@@ -164,11 +189,22 @@ class HealthConnectManager @Inject constructor(
                 return false
             }
             val granted = healthConnectClient!!.permissionController.getGrantedPermissions()
-            permissions.all { it in granted }
+            requiredPermissions.all { it in granted }
         } catch (e: Exception) {
             // Health Connect not available or error accessing permissions
             false
         }
+    }
+
+    /** Whether one specific permission is granted. Used to gate the optional reads. */
+    private suspend fun hasPermission(permission: String): Boolean = try {
+        if (!isAvailable() || healthConnectClient == null) {
+            false
+        } else {
+            permission in healthConnectClient!!.permissionController.getGrantedPermissions()
+        }
+    } catch (e: Exception) {
+        false
     }
 
     /**
@@ -1244,5 +1280,148 @@ class HealthConnectManager @Inject constructor(
             Result.failure(e)
         }
     }
-}
 
+    // ==================== Daily activity (steps, calories, HRV) ====================
+
+    /**
+     * Syncs whole-day activity into `daily_activity_logs`: steps, calories, and overnight HRV.
+     *
+     * This is the non-exercise half of energy expenditure, which the app previously approximated
+     * with a single fixed multiplier for every day alike. A desk day and a day on your feet differ
+     * by several hundred kilocalories, and that difference was invisible.
+     *
+     * ## Partial data is normal
+     * Total calories and HRV are optional permissions ([optionalPermissions]), and a watch may
+     * record one and not the other. Each read is independent and failure is silent: a day with
+     * steps but no HRV is written with steps, not skipped.
+     *
+     * ## Workout steps are counted separately, not subtracted here
+     * The split is stored rather than resolved, so
+     * [com.tripath.data.local.database.entities.DailyActivityLog.nonExerciseSteps] can be audited
+     * when the numbers look wrong.
+     */
+    suspend fun syncDailyActivity(daysToLookBack: Int = 30): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            if (!isAvailable()) {
+                return@withContext Result.failure(IllegalStateException("Health Connect is not available"))
+            }
+            if (!checkPermissions()) {
+                return@withContext Result.failure(SecurityException("Health Connect permissions not granted"))
+            }
+
+            val zone = ZoneId.systemDefault()
+            val endDate = LocalDate.now()
+            val startDate = endDate.minusDays(daysToLookBack.toLong())
+            val startInstant = startDate.atStartOfDay(zone).toInstant()
+            val endInstant = endDate.plusDays(1).atStartOfDay(zone).toInstant()
+            val range = TimeRangeFilter.between(startInstant, endInstant)
+
+            val canReadTotalCalories = hasPermission(
+                HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class)
+            )
+            val canReadHrv = hasPermission(
+                HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class)
+            )
+
+            // Steps records carry a start and end; bucket by the start day, which is how a step
+            // counter that rolls over midnight is conventionally attributed.
+            val stepsByDate = mutableMapOf<LocalDate, Long>()
+            readOrEmpty { healthConnectClient?.readRecords(ReadRecordsRequest(StepsRecord::class, range))?.records }
+                .forEach { record ->
+                    val date = record.startTime.atZone(zone).toLocalDate()
+                    stepsByDate[date] = (stepsByDate[date] ?: 0L) + record.count
+                }
+
+            val activeByDate = mutableMapOf<LocalDate, Double>()
+            readOrEmpty {
+                healthConnectClient?.readRecords(
+                    ReadRecordsRequest(ActiveCaloriesBurnedRecord::class, range)
+                )?.records
+            }.forEach { record ->
+                val date = record.startTime.atZone(zone).toLocalDate()
+                activeByDate[date] = (activeByDate[date] ?: 0.0) + record.energy.inKilocalories
+            }
+
+            val totalByDate = mutableMapOf<LocalDate, Double>()
+            if (canReadTotalCalories) {
+                readOrEmpty {
+                    healthConnectClient?.readRecords(
+                        ReadRecordsRequest(TotalCaloriesBurnedRecord::class, range)
+                    )?.records
+                }.forEach { record ->
+                    val date = record.startTime.atZone(zone).toLocalDate()
+                    totalByDate[date] = (totalByDate[date] ?: 0.0) + record.energy.inKilocalories
+                }
+            }
+
+            // HRV is sampled repeatedly overnight. The night's median is far more stable than any
+            // single reading, and it is the night-to-night trend that carries the signal.
+            val hrvSamplesByDate = mutableMapOf<LocalDate, MutableList<Double>>()
+            if (canReadHrv) {
+                readOrEmpty {
+                    healthConnectClient?.readRecords(
+                        ReadRecordsRequest(HeartRateVariabilityRmssdRecord::class, range)
+                    )?.records
+                }.forEach { record ->
+                    val date = record.time.atZone(zone).toLocalDate()
+                    hrvSamplesByDate.getOrPut(date) { mutableListOf() }.add(record.heartRateVariabilityMillis)
+                }
+            }
+
+            // Steps inside a logged session, so the NEAT term does not re-count a marathon.
+            val workoutStepsByDate = repository.getAllWorkoutLogsOnce()
+                .filter { !it.date.isBefore(startDate) && !it.date.isAfter(endDate) }
+                .groupBy { it.date }
+                .mapValues { (_, logs) -> logs.sumOf { it.steps ?: 0 } }
+
+            val dates = (stepsByDate.keys + activeByDate.keys + totalByDate.keys + hrvSamplesByDate.keys)
+            val rows = dates.map { date ->
+                DailyActivityLog(
+                    date = date,
+                    steps = stepsByDate[date]?.toInt(),
+                    workoutSteps = workoutStepsByDate[date],
+                    activeCaloriesKcal = activeByDate[date],
+                    totalCaloriesKcal = totalByDate[date],
+                    hrvRmssd = hrvSamplesByDate[date]?.takeIf { it.isNotEmpty() }?.median()
+                )
+            }
+            dailyActivityDao.upsertAll(rows)
+
+            // Back-fill only where the athlete hasn't entered a value by hand — HRV logging is
+            // manual-only today, which is why the field is almost always empty.
+            hrvSamplesByDate.forEach { (date, samples) ->
+                val median = samples.takeIf { it.isNotEmpty() }?.median() ?: return@forEach
+                val existing = wellnessDao.getLogByDate(date)
+                if (existing?.hrvRmssd == null) {
+                    wellnessDao.insertLog(existing?.copy(hrvRmssd = median) ?: DailyWellnessLog(date = date, hrvRmssd = median))
+                }
+            }
+
+            Log.d("HealthConnect", "Synced ${rows.size} days of activity data")
+            Result.success(rows.size)
+        } catch (e: Exception) {
+            Log.e("HealthConnect", "Daily activity sync failed", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Runs a Health Connect read, returning an empty list rather than throwing.
+     *
+     * A permission the user revoked, or a record type the device's Health Connect version does not
+     * know, must not take down the rest of the day's sync — every field here is independently
+     * optional by design.
+     */
+    private inline fun <T> readOrEmpty(block: () -> List<T>?): List<T> = try {
+        block() ?: emptyList()
+    } catch (e: Exception) {
+        Log.d("HealthConnect", "Optional read unavailable: ${e.message}")
+        emptyList()
+    }
+
+    private fun List<Double>.median(): Double {
+        val sorted = sorted()
+        val mid = sorted.size / 2
+        return if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+    }
+}

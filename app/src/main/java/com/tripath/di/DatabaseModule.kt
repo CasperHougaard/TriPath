@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.tripath.BuildConfig
 import com.tripath.data.local.database.AppDatabase
 import com.tripath.data.local.database.dao.BodyCompositionDao
+import com.tripath.data.local.database.dao.DailyActivityDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
@@ -26,6 +27,8 @@ import com.tripath.data.local.database.migrations.MIGRATION_16_17
 import com.tripath.data.local.database.migrations.MIGRATION_17_18
 import com.tripath.data.local.database.migrations.MIGRATION_18_19
 import com.tripath.data.local.database.migrations.MIGRATION_19_20
+import com.tripath.data.local.database.migrations.MIGRATION_20_21
+import com.tripath.data.local.database.migrations.MIGRATION_21_22
 import com.tripath.data.local.database.migrations.MIGRATION_2_3
 import com.tripath.data.local.database.migrations.MIGRATION_3_4
 import com.tripath.data.local.database.migrations.MIGRATION_4_5
@@ -80,7 +83,9 @@ object DatabaseModule {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
-                MIGRATION_19_20
+                MIGRATION_19_20,
+                MIGRATION_20_21,
+                MIGRATION_21_22
             )
             .apply {
                 // Debug only. In release this fallback would silently delete every workout,
@@ -158,6 +163,12 @@ object DatabaseModule {
     @Singleton
     fun provideWellnessDao(database: AppDatabase): WellnessDao {
         return database.wellnessDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideDailyActivityDao(database: AppDatabase): DailyActivityDao {
+        return database.dailyActivityDao()
     }
 }
 

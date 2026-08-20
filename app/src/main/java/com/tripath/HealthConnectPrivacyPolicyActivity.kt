@@ -23,7 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import com.tripath.data.local.preferences.PreferencesManager
-import com.tripath.ui.theme.TriPathTheme
+import com.tripath.ui.theme.TriPathAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -41,32 +41,7 @@ class HealthConnectPrivacyPolicyActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         setContent {
-            // Observe dark theme preference
-            val isDarkTheme by preferencesManager.darkThemeFlow.collectAsState(initial = true)
-            val view = LocalView.current
-            
-            // Configure Android system status bar and navigation bar icons based on theme
-            DisposableEffect(isDarkTheme) {
-                val windowInsetsController = WindowCompat.getInsetsController(window, view)
-                
-                if (isDarkTheme) {
-                    // Dark theme: dark bars with bright icons
-                    @Suppress("DEPRECATION")
-                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                    windowInsetsController.isAppearanceLightNavigationBars = false
-                    windowInsetsController.isAppearanceLightStatusBars = false
-                } else {
-                    // Light theme: light bars with dark icons
-                    @Suppress("DEPRECATION")
-                    window.navigationBarColor = android.graphics.Color.WHITE
-                    windowInsetsController.isAppearanceLightNavigationBars = true
-                    windowInsetsController.isAppearanceLightStatusBars = true
-                }
-                
-                onDispose { }
-            }
-            
-            TriPathTheme(darkTheme = isDarkTheme) {
+            TriPathAppTheme(preferencesManager) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background

@@ -295,5 +295,9 @@ fun AppBackupData.recordCounts(): Map<String, Int> = mapOf(
     "bodyCompositionLogs" to bodyCompositionLogs.size,
     "nutritionLogs" to nutritionLogs.size,
     "nutritionEntries" to nutritionEntries.size,
+    "dailyActivityLogs" to dailyActivityLogs.size,
+    "liftSessionLogs" to liftSessionLogs.size,
+    "liftSetLogs" to liftSetLogs.size,
+    "liftExerciseCatalog" to liftExerciseCatalog.size,
     "preferences" to preferences.size
 )

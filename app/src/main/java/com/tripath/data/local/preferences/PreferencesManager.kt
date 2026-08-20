@@ -13,10 +13,15 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
+import com.tripath.data.model.ActivityLevel
+import com.tripath.data.model.NutritionGoal
+import com.tripath.data.model.ProjectionMode
 import com.tripath.data.model.TrainingBalance
 import com.tripath.data.model.UserProfile
 import com.tripath.data.model.WorkoutType
 import com.tripath.domain.running.RunningGoal
+import com.tripath.ui.theme.AppearanceMode
+import com.tripath.ui.theme.TriPathPalette
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -44,6 +49,15 @@ class PreferencesManager @Inject constructor(
 
     companion object {
         private val DARK_THEME_KEY = booleanPreferencesKey("dark_theme")
+
+        /**
+         * Appearance. Not in [TRANSIENT_KEY_NAMES] on purpose — a palette choice is user data,
+         * so it rides along in the backup via [exportAll] and returns on a phone swap.
+         */
+        private val APPEARANCE_MODE_KEY = stringPreferencesKey("appearance_mode")
+        private val LIGHT_PALETTE_KEY = stringPreferencesKey("light_palette")
+        private val DARK_PALETTE_KEY = stringPreferencesKey("dark_palette")
+
         private val SYNC_DAYS_KEY = intPreferencesKey("sync_days_back")
         private val INCLUDE_IMPORTED_ACTIVITIES_KEY = booleanPreferencesKey("include_imported_activities")
         private val SLEEP_SCORE_BACKFILL_DONE_KEY = booleanPreferencesKey("sleep_score_backfill_done")
@@ -70,6 +84,15 @@ class PreferencesManager @Inject constructor(
         private val HEIGHT_CM_KEY = intPreferencesKey("height_cm")
         private val PROTEIN_TARGET_G_KEY = floatPreferencesKey("protein_target_g")
         private val CALORIE_TARGET_KEY = floatPreferencesKey("calorie_target")
+
+        // Fuel model keys. All optional — the model falls back to documented defaults so an
+        // existing install keeps working before the user has been near the goal screen.
+        private val NUTRITION_GOAL_KEY = stringPreferencesKey("nutrition_goal")
+        private val GOAL_RATE_PCT_PER_WEEK_KEY = floatPreferencesKey("goal_rate_pct_per_week")
+        private val RMR_OVERRIDE_KCAL_KEY = intPreferencesKey("rmr_override_kcal")
+        private val ACTIVITY_LEVEL_KEY = stringPreferencesKey("activity_level")
+        private val SLEEP_NEED_MINUTES_KEY = intPreferencesKey("sleep_need_minutes")
+        private val PROJECTION_MODE_KEY = stringPreferencesKey("projection_mode")
         private val ACTIVE_RUNNING_GOAL_KEY = stringPreferencesKey("active_running_goal")
         
         // Planner Auto-planner Settings keys
@@ -123,6 +146,54 @@ class PreferencesManager @Inject constructor(
             val current = preferences[DARK_THEME_KEY] ?: true
             preferences[DARK_THEME_KEY] = !current
         }
+    }
+
+    // ==================== Appearance ====================
+
+    /**
+     * The light/dark mode: follow the system, or force one.
+     *
+     * Migrates the pre-design-system `dark_theme` boolean rather than ignoring it — `true`
+     * becomes [AppearanceMode.DARK] and `false` becomes [AppearanceMode.LIGHT], so an existing
+     * install keeps launching exactly as it did. Reading the legacy key as a fallback (rather
+     * than rewriting it once at startup) means there is no migration step that can half-run.
+     */
+    val appearanceModeFlow: Flow<AppearanceMode> = dataStore.data.map { preferences ->
+        preferences[APPEARANCE_MODE_KEY]?.let(AppearanceMode::fromPrefValue)
+            ?: when (preferences[DARK_THEME_KEY]) {
+                true -> AppearanceMode.DARK
+                false -> AppearanceMode.LIGHT
+                null -> AppearanceMode.DEFAULT
+            }
+    }
+
+    suspend fun setAppearanceMode(mode: AppearanceMode) {
+        dataStore.edit { preferences ->
+            preferences[APPEARANCE_MODE_KEY] = mode.prefValue
+            // Keep the legacy key consistent: it is still what `darkThemeFlow` reads, and the
+            // widget and privacy-policy activity have no reason to learn the richer model.
+            if (mode != AppearanceMode.SYSTEM) {
+                preferences[DARK_THEME_KEY] = mode == AppearanceMode.DARK
+            }
+        }
+    }
+
+    /** The palette used when light mode is in effect. */
+    val lightPaletteFlow: Flow<TriPathPalette> = dataStore.data.map { preferences ->
+        TriPathPalette.fromPrefValue(preferences[LIGHT_PALETTE_KEY])
+    }
+
+    /** The palette used when dark mode is in effect. Need not match [lightPaletteFlow]. */
+    val darkPaletteFlow: Flow<TriPathPalette> = dataStore.data.map { preferences ->
+        TriPathPalette.fromPrefValue(preferences[DARK_PALETTE_KEY])
+    }
+
+    suspend fun setLightPalette(palette: TriPathPalette) {
+        dataStore.edit { it[LIGHT_PALETTE_KEY] = palette.prefValue }
+    }
+
+    suspend fun setDarkPalette(palette: TriPathPalette) {
+        dataStore.edit { it[DARK_PALETTE_KEY] = palette.prefValue }
     }
 
     /**
@@ -201,6 +272,12 @@ class PreferencesManager @Inject constructor(
         val heightCm = preferences[HEIGHT_CM_KEY]
         val proteinTargetG = preferences[PROTEIN_TARGET_G_KEY]
         val calorieTarget = preferences[CALORIE_TARGET_KEY]
+        val nutritionGoalName = preferences[NUTRITION_GOAL_KEY]
+        val goalRatePctPerWeek = preferences[GOAL_RATE_PCT_PER_WEEK_KEY]
+        val rmrOverrideKcal = preferences[RMR_OVERRIDE_KCAL_KEY]
+        val activityLevelName = preferences[ACTIVITY_LEVEL_KEY]
+        val sleepNeedMinutes = preferences[SLEEP_NEED_MINUTES_KEY]
+        val projectionModeName = preferences[PROJECTION_MODE_KEY]
 
         // If no fields are set, return null
         if (ftpBike == null && maxHeartRate == null && defaultSwimTSS == null &&
@@ -209,7 +286,9 @@ class PreferencesManager @Inject constructor(
             cssSecondsper100m == null && thresholdRunPace == null && weeklyAvailabilityJson == null &&
             longTrainingDayName == null && strengthDays == null && trainingBalanceJson == null &&
             biologicalSexName == null && birthDateEpochDay == null && heightCm == null &&
-            proteinTargetG == null && calorieTarget == null
+            proteinTargetG == null && calorieTarget == null &&
+            nutritionGoalName == null && goalRatePctPerWeek == null && rmrOverrideKcal == null &&
+            activityLevelName == null && sleepNeedMinutes == null && projectionModeName == null
         ) {
             return null
         }
@@ -269,7 +348,15 @@ class PreferencesManager @Inject constructor(
             birthDate = birthDateEpochDay?.let { LocalDate.ofEpochDay(it) },
             heightCm = heightCm,
             proteinTargetG = proteinTargetG,
-            calorieTarget = calorieTarget
+            calorieTarget = calorieTarget,
+            // Unrecognised names decode to null rather than throwing, so a backup written by a
+            // newer build restores cleanly onto an older one and simply falls back to the default.
+            nutritionGoal = NutritionGoal.fromName(nutritionGoalName),
+            goalRatePctPerWeek = goalRatePctPerWeek,
+            rmrOverrideKcal = rmrOverrideKcal,
+            activityLevel = ActivityLevel.fromName(activityLevelName),
+            sleepNeedMinutes = sleepNeedMinutes,
+            projectionMode = ProjectionMode.fromName(projectionModeName)
         )
     }
 
@@ -329,6 +416,19 @@ class PreferencesManager @Inject constructor(
                 ?: preferences.remove(PROTEIN_TARGET_G_KEY)
             profile.calorieTarget?.let { preferences[CALORIE_TARGET_KEY] = it }
                 ?: preferences.remove(CALORIE_TARGET_KEY)
+
+            profile.nutritionGoal?.let { preferences[NUTRITION_GOAL_KEY] = it.name }
+                ?: preferences.remove(NUTRITION_GOAL_KEY)
+            profile.goalRatePctPerWeek?.let { preferences[GOAL_RATE_PCT_PER_WEEK_KEY] = it }
+                ?: preferences.remove(GOAL_RATE_PCT_PER_WEEK_KEY)
+            profile.rmrOverrideKcal?.let { preferences[RMR_OVERRIDE_KCAL_KEY] = it }
+                ?: preferences.remove(RMR_OVERRIDE_KCAL_KEY)
+            profile.activityLevel?.let { preferences[ACTIVITY_LEVEL_KEY] = it.name }
+                ?: preferences.remove(ACTIVITY_LEVEL_KEY)
+            profile.sleepNeedMinutes?.let { preferences[SLEEP_NEED_MINUTES_KEY] = it }
+                ?: preferences.remove(SLEEP_NEED_MINUTES_KEY)
+            profile.projectionMode?.let { preferences[PROJECTION_MODE_KEY] = it.name }
+                ?: preferences.remove(PROJECTION_MODE_KEY)
         }
     }
 
@@ -357,6 +457,12 @@ class PreferencesManager @Inject constructor(
             preferences.remove(HEIGHT_CM_KEY)
             preferences.remove(PROTEIN_TARGET_G_KEY)
             preferences.remove(CALORIE_TARGET_KEY)
+            preferences.remove(NUTRITION_GOAL_KEY)
+            preferences.remove(GOAL_RATE_PCT_PER_WEEK_KEY)
+            preferences.remove(RMR_OVERRIDE_KCAL_KEY)
+            preferences.remove(ACTIVITY_LEVEL_KEY)
+            preferences.remove(SLEEP_NEED_MINUTES_KEY)
+            preferences.remove(PROJECTION_MODE_KEY)
         }
     }
 

@@ -11,8 +11,12 @@ import com.tripath.data.local.healthconnect.HealthConnectManager
 import com.tripath.data.local.healthconnect.ReprocessResult
 import com.tripath.data.local.healthconnect.SleepSyncResult
 import com.tripath.data.local.healthconnect.SyncResult
+import com.tripath.data.local.liftpath.LiftPathConnection
+import com.tripath.data.local.liftpath.LiftPathSyncManager
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.ui.theme.AppearanceMode
+import com.tripath.ui.theme.TriPathPalette
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +35,16 @@ enum class HealthConnectStatus {
     CONNECTED           // Available and permissions granted
 }
 
+/** LiftPath connection status, mirroring [HealthConnectStatus]'s three-state shape. */
+enum class LiftPathStatus {
+    NOT_INSTALLED,
+    NOT_ENABLED,
+    HANDSHAKE_FAILED,
+    /** Handshake succeeded but the contract version or schema hash disagree. */
+    VERSION_MISMATCH,
+    CONNECTED
+}
+
 data class SettingsUiState(
     val isLoading: Boolean = false,
     val resetSuccess: Boolean = false,
@@ -42,8 +56,16 @@ data class SettingsUiState(
     val syncSuccess: Boolean? = null,
     val lastSyncDetails: SyncResult? = null,
     val syncedWorkouts: List<WorkoutLog> = emptyList(),
-    // Theme preference
-    val isDarkTheme: Boolean = true,
+    // LiftPath connection state
+    val liftPathStatus: LiftPathStatus = LiftPathStatus.NOT_INSTALLED,
+    val liftPathEnabled: Boolean = false,
+    val liftPathSyncing: Boolean = false,
+    val liftPathSessionCount: Int = 0,
+    val liftPathLastSyncMillis: Long = 0L,
+    // Appearance preference
+    val appearanceMode: AppearanceMode = AppearanceMode.DEFAULT,
+    val lightPalette: TriPathPalette = TriPathPalette.DEFAULT,
+    val darkPalette: TriPathPalette = TriPathPalette.DEFAULT,
     // Sync days preference
     val syncDaysBack: Int = 30,
     // User Profile state
@@ -60,6 +82,7 @@ class SettingsViewModel @Inject constructor(
     private val backupManager: BackupManager,
     private val cloudSnapshotStore: CloudSnapshotStore,
     private val healthConnectManager: HealthConnectManager,
+    private val liftPathSyncManager: LiftPathSyncManager,
     private val preferencesManager: PreferencesManager,
     private val repository: TrainingRepository,
     private val application: Application,
@@ -77,14 +100,27 @@ class SettingsViewModel @Inject constructor(
     init {
         // Check Health Connect status on initialization
         refreshHealthConnectStatus()
-        
+
+        // Check LiftPath connection status on initialization
+        refreshLiftPathStatus()
+
         // Load synced workouts
         loadSyncedWorkouts()
         
-        // Observe dark theme preference
+        // Observe appearance preference
         viewModelScope.launch {
-            preferencesManager.darkThemeFlow.collect { isDark ->
-                _uiState.value = _uiState.value.copy(isDarkTheme = isDark)
+            preferencesManager.appearanceModeFlow.collect { mode ->
+                _uiState.value = _uiState.value.copy(appearanceMode = mode)
+            }
+        }
+        viewModelScope.launch {
+            preferencesManager.lightPaletteFlow.collect { palette ->
+                _uiState.value = _uiState.value.copy(lightPalette = palette)
+            }
+        }
+        viewModelScope.launch {
+            preferencesManager.darkPaletteFlow.collect { palette ->
+                _uiState.value = _uiState.value.copy(darkPalette = palette)
             }
         }
         
@@ -125,12 +161,24 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Toggle dark/light theme.
-     */
-    fun toggleTheme() {
+    /** Switch between following the system light/dark setting or forcing one. */
+    fun setAppearanceMode(mode: AppearanceMode) {
         viewModelScope.launch {
-            preferencesManager.toggleDarkTheme()
+            preferencesManager.setAppearanceMode(mode)
+        }
+    }
+
+    /** Set the palette used when light mode is in effect. */
+    fun setLightPalette(palette: TriPathPalette) {
+        viewModelScope.launch {
+            preferencesManager.setLightPalette(palette)
+        }
+    }
+
+    /** Set the palette used when dark mode is in effect. */
+    fun setDarkPalette(palette: TriPathPalette) {
+        viewModelScope.launch {
+            preferencesManager.setDarkPalette(palette)
         }
     }
 
@@ -145,6 +193,55 @@ class SettingsViewModel @Inject constructor(
                 else -> HealthConnectStatus.CONNECTED
             }
             _uiState.value = _uiState.value.copy(healthConnectStatus = status)
+        }
+    }
+
+    /**
+     * Refresh LiftPath's install/enable/handshake status.
+     *
+     * The handshake is queried fresh (not just read from cached prefs) so toggling the
+     * integration on immediately shows whether LiftPath is actually reachable.
+     */
+    fun refreshLiftPathStatus() {
+        viewModelScope.launch {
+            val enabled = LiftPathConnection.isEnabled(application)
+            val status = withContext(Dispatchers.IO) {
+                when {
+                    !LiftPathConnection.isInstalled(application) -> LiftPathStatus.NOT_INSTALLED
+                    !enabled -> LiftPathStatus.NOT_ENABLED
+                    else -> {
+                        val handshake = LiftPathConnection.handshake(application)
+                        when {
+                            handshake == null -> LiftPathStatus.HANDSHAKE_FAILED
+                            !handshake.versionMatches -> LiftPathStatus.VERSION_MISMATCH
+                            else -> LiftPathStatus.CONNECTED
+                        }
+                    }
+                }
+            }
+            _uiState.value = _uiState.value.copy(
+                liftPathEnabled = enabled,
+                liftPathStatus = status,
+                liftPathLastSyncMillis = LiftPathConnection.lastSyncTime(application)
+            )
+        }
+    }
+
+    fun setLiftPathEnabled(enabled: Boolean) {
+        LiftPathConnection.setEnabled(application, enabled)
+        _uiState.value = _uiState.value.copy(liftPathEnabled = enabled)
+        refreshLiftPathStatus()
+        if (enabled) syncLiftPath()
+    }
+
+    /** Pulls sessions, sets and the exercise catalog from LiftPath's content provider. */
+    fun syncLiftPath() {
+        if (_uiState.value.liftPathSyncing) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(liftPathSyncing = true)
+            liftPathSyncManager.sync()
+            refreshLiftPathStatus()
+            _uiState.value = _uiState.value.copy(liftPathSyncing = false)
         }
     }
 
@@ -430,7 +527,13 @@ class SettingsViewModel @Inject constructor(
         goalDate: java.time.LocalDate?,
         biologicalSex: com.tripath.data.model.BiologicalSex? = null,
         birthDate: java.time.LocalDate? = null,
-        heightCm: Int? = null
+        heightCm: Int? = null,
+        nutritionGoal: com.tripath.data.model.NutritionGoal? = null,
+        goalRatePctPerWeek: Float? = null,
+        rmrOverrideKcal: Int? = null,
+        activityLevel: com.tripath.data.model.ActivityLevel? = null,
+        sleepNeedMinutes: Int? = null,
+        projectionMode: com.tripath.data.model.ProjectionMode? = null
     ) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
@@ -475,7 +578,13 @@ class SettingsViewModel @Inject constructor(
                 goalDate = goalDate,
                 biologicalSex = biologicalSex,
                 birthDate = birthDate,
-                heightCm = heightCm
+                heightCm = heightCm,
+                nutritionGoal = nutritionGoal,
+                goalRatePctPerWeek = goalRatePctPerWeek,
+                rmrOverrideKcal = rmrOverrideKcal,
+                activityLevel = activityLevel,
+                sleepNeedMinutes = sleepNeedMinutes,
+                projectionMode = projectionMode
             ) ?: UserProfile(
                 ftpBike = ftpBike,
                 maxHeartRate = maxHeartRate,
@@ -485,7 +594,13 @@ class SettingsViewModel @Inject constructor(
                 goalDate = goalDate,
                 biologicalSex = biologicalSex,
                 birthDate = birthDate,
-                heightCm = heightCm
+                heightCm = heightCm,
+                nutritionGoal = nutritionGoal,
+                goalRatePctPerWeek = goalRatePctPerWeek,
+                rmrOverrideKcal = rmrOverrideKcal,
+                activityLevel = activityLevel,
+                sleepNeedMinutes = sleepNeedMinutes,
+                projectionMode = projectionMode
             )
             
             try {

@@ -2,6 +2,7 @@
 package com.tripath.data.local.repository
 
 import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.SleepLog
@@ -11,6 +12,9 @@ import java.time.LocalDate
 interface RecoveryRepository {
 
     fun getBodyCompositionLogs(): Flow<List<BodyCompositionLog>>
+
+    /** Whole-day steps, calories and HRV from Health Connect. Newest first. */
+    fun getDailyActivityLogs(): Flow<List<DailyActivityLog>>
 
     fun getAllBodyCompositionLogsIncludingIgnored(): Flow<List<BodyCompositionLog>>
 

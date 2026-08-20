@@ -5,8 +5,10 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.tripath.data.local.database.converters.Converters
 import com.tripath.data.local.database.dao.BodyCompositionDao
+import com.tripath.data.local.database.dao.DailyActivityDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.LiftPathDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
@@ -16,9 +18,13 @@ import com.tripath.data.local.database.dao.TrainingPlanDao
 import com.tripath.data.local.database.dao.WellnessDao
 import com.tripath.data.local.database.dao.WorkoutLogDao
 import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.DailyWellnessLog
+import com.tripath.data.local.database.entities.LiftExerciseCatalogEntry
+import com.tripath.data.local.database.entities.LiftSessionLog
+import com.tripath.data.local.database.entities.LiftSetLog
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.RawWorkoutData
@@ -53,9 +59,13 @@ import com.tripath.data.local.database.entities.WorkoutLog
         WellnessTaskDefinition::class,
         BodyCompositionLog::class,
         NutritionLog::class,
-        NutritionEntry::class
+        NutritionEntry::class,
+        DailyActivityLog::class,
+        LiftSessionLog::class,
+        LiftSetLog::class,
+        LiftExerciseCatalogEntry::class
     ],
-    version = 20,
+    version = 22,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -72,6 +82,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bodyCompositionDao(): BodyCompositionDao
     abstract fun nutritionLogDao(): NutritionLogDao
     abstract fun nutritionEntryDao(): NutritionEntryDao
+    abstract fun dailyActivityDao(): DailyActivityDao
+    abstract fun liftPathDao(): LiftPathDao
 
     companion object {
         const val DATABASE_NAME = "tripath_database"

@@ -1,8 +1,11 @@
 package com.tripath.ui.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -20,6 +25,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
@@ -32,6 +38,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,8 +48,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -61,7 +70,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.tripath.data.model.UserProfile
 import com.tripath.ui.components.SectionHeader
+import com.tripath.ui.theme.AppearanceMode
 import com.tripath.ui.theme.Spacing
+import com.tripath.ui.theme.TriPathPalette
 import com.tripath.ui.theme.TriPathTheme
 import java.time.format.DateTimeFormatter
 
@@ -141,12 +152,13 @@ fun SettingsScreen(
                 // Appearance Section
                 SectionHeader(title = "Appearance")
 
-                SettingsToggleCard(
-                    icon = if (uiState.isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
-                    title = "Dark Theme",
-                    subtitle = if (uiState.isDarkTheme) "Enabled" else "Disabled",
-                    checked = uiState.isDarkTheme,
-                    onCheckedChange = { viewModel.toggleTheme() }
+                AppearanceCard(
+                    mode = uiState.appearanceMode,
+                    lightPalette = uiState.lightPalette,
+                    darkPalette = uiState.darkPalette,
+                    onModeChange = { viewModel.setAppearanceMode(it) },
+                    onLightPaletteChange = { viewModel.setLightPalette(it) },
+                    onDarkPaletteChange = { viewModel.setDarkPalette(it) }
                 )
 
                 // Health Connect Section
@@ -169,6 +181,20 @@ fun SettingsScreen(
                     onViewSyncedClick = {
                         navController?.navigate(com.tripath.ui.navigation.Screen.SyncedExercises.route)
                     }
+                )
+
+                // LiftPath Section
+                SectionHeader(
+                    title = "LiftPath",
+                    subtitle = "Bring in set-level lifting detail (RPE, tier, target muscles)"
+                )
+
+                LiftPathCard(
+                    status = uiState.liftPathStatus,
+                    enabled = uiState.liftPathEnabled,
+                    isSyncing = uiState.liftPathSyncing,
+                    onEnabledChange = { viewModel.setLiftPathEnabled(it) },
+                    onSyncClick = { viewModel.syncLiftPath() }
                 )
 
                 // Data & Backup Section
@@ -220,46 +246,173 @@ fun SettingsScreen(
     }
 }
 
+/**
+ * Appearance mode (system/light/dark) plus one palette swatch row per mode.
+ *
+ * Both palette rows are always shown, not just the one [mode] currently resolves to — the user
+ * picks a light-mode palette and a dark-mode palette independently, so switching mode later
+ * doesn't need a second trip here.
+ */
 @Composable
-private fun SettingsToggleCard(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
+private fun AppearanceCard(
+    mode: AppearanceMode,
+    lightPalette: TriPathPalette,
+    darkPalette: TriPathPalette,
+    onModeChange: (AppearanceMode) -> Unit,
+    onLightPaletteChange: (TriPathPalette) -> Unit,
+    onDarkPaletteChange: (TriPathPalette) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(Spacing.lg),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm)
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column {
-                    Text(text = title, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                AppearanceMode.entries.forEach { candidate ->
+                    ModeChip(
+                        mode = candidate,
+                        selected = candidate == mode,
+                        onClick = { onModeChange(candidate) },
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            PaletteRow(
+                label = "Light palette",
+                selected = lightPalette,
+                dark = false,
+                onSelect = onLightPaletteChange
+            )
+
+            PaletteRow(
+                label = "Dark palette",
+                selected = darkPalette,
+                dark = true,
+                onSelect = onDarkPaletteChange
+            )
         }
+    }
+}
+
+@Composable
+private fun ModeChip(
+    mode: AppearanceMode,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    FilterChip(
+        modifier = modifier,
+        selected = selected,
+        onClick = onClick,
+        label = { Text(mode.label) },
+        leadingIcon = {
+            Icon(
+                imageVector = when (mode) {
+                    AppearanceMode.SYSTEM -> Icons.Default.BrightnessMedium
+                    AppearanceMode.LIGHT -> Icons.Default.LightMode
+                    AppearanceMode.DARK -> Icons.Default.DarkMode
+                },
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    )
+}
+
+/** One horizontally-scrolling row of [PaletteSwatch], previewed in [dark] or light mode. */
+@Composable
+private fun PaletteRow(
+    label: String,
+    selected: TriPathPalette,
+    dark: Boolean,
+    onSelect: (TriPathPalette) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            TriPathPalette.entries.forEach { palette ->
+                PaletteSwatch(
+                    palette = palette,
+                    dark = dark,
+                    selected = palette == selected,
+                    onClick = { onSelect(palette) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A palette's canvas and accent, previewed directly from [TriPathPalette.colors] rather than
+ * the active theme — the whole point is to preview palettes the app isn't currently wearing.
+ */
+@Composable
+private fun PaletteSwatch(
+    palette: TriPathPalette,
+    dark: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = palette.colors(dark)
+    Column(
+        modifier = modifier
+            .width(56.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(colors.canvas)
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) colors.accent else MaterialTheme.colorScheme.outlineVariant,
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .background(colors.accent)
+            )
+        }
+        Text(
+            text = palette.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
     }
 }
 
@@ -446,6 +599,142 @@ private fun StatusChip(status: HealthConnectStatus) {
             MaterialTheme.colorScheme.onPrimaryContainer,
             "Connected",
             Icons.Default.Check
+        )
+    }
+
+    Card(colors = CardDefaults.cardColors(containerColor = bgColor as androidx.compose.ui.graphics.Color)) {
+        Row(
+            modifier = Modifier.padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon as androidx.compose.ui.graphics.vector.ImageVector,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = textColor as androidx.compose.ui.graphics.Color
+            )
+            Text(
+                text = text as String,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                color = textColor
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiftPathCard(
+    status: LiftPathStatus,
+    enabled: Boolean,
+    isSyncing: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onSyncClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(Spacing.lg),
+            verticalArrangement = Arrangement.spacedBy(Spacing.md)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Enable integration",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                    enabled = status != LiftPathStatus.NOT_INSTALLED
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Status",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                LiftPathStatusChip(status)
+            }
+
+            val explanation = when (status) {
+                LiftPathStatus.NOT_INSTALLED -> "LiftPath is not installed on this device."
+                LiftPathStatus.NOT_ENABLED -> "Turn this on to import lifting sessions from LiftPath."
+                LiftPathStatus.HANDSHAKE_FAILED -> "Couldn't reach LiftPath. Open it once, then try again."
+                LiftPathStatus.VERSION_MISMATCH ->
+                    "LiftPath and TriPath disagree on the data contract — update one or both apps."
+                LiftPathStatus.CONNECTED -> "Connected. Lifting sets sync into your training load and fuel model."
+            }
+            Text(
+                text = explanation,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+
+            if (enabled && status != LiftPathStatus.NOT_INSTALLED) {
+                Button(
+                    onClick = onSyncClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isSyncing
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(end = Spacing.sm).height(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    Text(if (isSyncing) "Syncing…" else "Sync now")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiftPathStatusChip(status: LiftPathStatus) {
+    val (bgColor, textColor, text, icon) = when (status) {
+        LiftPathStatus.CONNECTED -> listOf(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            "Connected",
+            Icons.Default.Check
+        )
+        LiftPathStatus.VERSION_MISMATCH -> listOf(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            "Version mismatch",
+            Icons.Default.Close
+        )
+        LiftPathStatus.HANDSHAKE_FAILED -> listOf(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            "Unreachable",
+            Icons.Default.Close
+        )
+        LiftPathStatus.NOT_ENABLED -> listOf(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            "Not enabled",
+            Icons.Default.Close
+        )
+        LiftPathStatus.NOT_INSTALLED -> listOf(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            "Not installed",
+            Icons.Default.Close
         )
     }
 

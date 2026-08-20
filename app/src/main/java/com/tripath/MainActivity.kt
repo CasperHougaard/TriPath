@@ -17,7 +17,7 @@ import com.tripath.data.local.backup.CloudSnapshotStore
 import com.tripath.data.local.healthconnect.HealthConnectManager
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.ui.MainScreen
-import com.tripath.ui.theme.TriPathTheme
+import com.tripath.ui.theme.TriPathAppTheme
 import com.tripath.widget.refreshNutritionWidget
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -58,42 +58,16 @@ class MainActivity : ComponentActivity() {
         // Honor a destination requested by the launching intent (e.g. tapping the widget).
         pendingDestination.value = intent?.getStringExtra(EXTRA_OPEN_DESTINATION)
         
-        // Set navigation bar to white for visibility in dark theme
-        val window = window
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        
+
         // Check Health Connect permissions on startup
         checkHealthConnectPermissions()
-        
+
         setContent {
-            // Observe dark theme preference
-            val isDarkTheme by preferencesManager.darkThemeFlow.collectAsState(initial = true)
-            val view = LocalView.current
-            
-            // Configure Android system status bar and navigation bar icons based on theme
-            DisposableEffect(isDarkTheme) {
-                val windowInsetsController = WindowCompat.getInsetsController(window, view)
-                
-                if (isDarkTheme) {
-                    // Dark theme: dark bars with bright icons
-                    @Suppress("DEPRECATION")
-                    window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                    windowInsetsController.isAppearanceLightNavigationBars = false
-                    windowInsetsController.isAppearanceLightStatusBars = false
-                } else {
-                    // Light theme: light bars with dark icons
-                    @Suppress("DEPRECATION")
-                    window.navigationBarColor = android.graphics.Color.WHITE
-                    windowInsetsController.isAppearanceLightNavigationBars = true
-                    windowInsetsController.isAppearanceLightStatusBars = true
-                }
-                
-                onDispose { }
-            }
-            
             val destination by pendingDestination.collectAsState()
 
-            TriPathTheme(darkTheme = isDarkTheme) {
+            // Appearance and system-bar contrast both live in TriPathAppTheme.
+            TriPathAppTheme(preferencesManager) {
                 MainScreen(
                     pendingDestination = destination,
                     onDestinationHandled = { pendingDestination.value = null }

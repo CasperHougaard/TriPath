@@ -6,7 +6,14 @@
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
     <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
+    <!--
+        Total calories already includes basal + active energy, so it is deliberately kept out of
+        the app's own RMR + NEAT + exercise + TEF model and used only as a "your watch says X, our
+        model says Y" cross-check. See DailyActivityLog.
+    -->
     <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
+    <!-- Overnight HRV. Previously the only source was manual entry, so it was nearly always absent. -->
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
     <uses-permission android:name="android.permission.health.READ_DISTANCE" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_SPEED" />
@@ -79,11 +86,24 @@
                 android:resource="@xml/nutrition_widget_info" />
         </receiver>
 
+        <!--
+            Read-only bridge that lets LiftPath consume TriPath's training load, recovery and
+            energy figures. Deliberately carries no android:permission: the two apps are signed
+            with different keys, so a signature permission would always be denied. The provider
+            verifies callingPackage instead, which the framework derives from the binder UID and
+            an app therefore cannot forge. See TriPathShareProvider.assertCallerAllowed.
+        -->
+        <provider
+            android:name=".data.local.share.TriPathShareProvider"
+            android:authorities="com.tripath.share"
+            android:exported="true" />
+
     </application>
 
     <!-- Declare that this app uses Health Connect -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+        <package android:name="com.liftpath" />
     </queries>
 
 </manifest>

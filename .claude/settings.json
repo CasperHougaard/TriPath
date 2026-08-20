@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.health.NutritionTargetsTest\")",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.health.*\")"
+    ]
+  }
+}

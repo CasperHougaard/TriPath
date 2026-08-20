@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.withTransaction
 import com.tripath.data.local.database.AppDatabase
 import com.tripath.data.local.database.dao.BodyCompositionDao
+import com.tripath.data.local.database.dao.DailyActivityDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
@@ -38,7 +39,8 @@ class BackupManager @Inject constructor(
     private val wellnessDao: WellnessDao,
     private val bodyCompositionDao: BodyCompositionDao,
     private val nutritionLogDao: NutritionLogDao,
-    private val nutritionEntryDao: NutritionEntryDao
+    private val nutritionEntryDao: NutritionEntryDao,
+    private val dailyActivityDao: DailyActivityDao
 ) {
     private val json = Json {
         prettyPrint = true
@@ -87,6 +89,7 @@ class BackupManager @Inject constructor(
                 bodyCompositionLogs = bodyCompositionDao.getAllOnce().map { it.toDto() },
                 nutritionLogs = nutritionLogDao.getAllOnce().map { it.toDto() },
                 nutritionEntries = nutritionEntryDao.getAllOnce().map { it.toDto() },
+                dailyActivityLogs = dailyActivityDao.getAllOnce().map { it.toDto() },
                 preferences = preferences,
                 // Version 5+ carries the profile inside `preferences`.
                 userProfile = null
@@ -198,6 +201,9 @@ class BackupManager @Inject constructor(
                 val nutritionEntries = backupData.nutritionEntries.map { it.toEntity() }
                 nutritionEntryDao.insertAll(nutritionEntries)
 
+                val dailyActivityLogs = backupData.dailyActivityLogs.map { it.toEntity() }
+                dailyActivityDao.upsertAll(dailyActivityLogs)
+
                 ImportSummary(
                     trainingPlansImported = trainingPlans.size,
                     workoutLogsImported = workoutLogs.size,
@@ -212,6 +218,7 @@ class BackupManager @Inject constructor(
                     bodyCompositionLogsImported = bodyCompositionLogs.size,
                     nutritionLogsImported = nutritionLogs.size,
                     nutritionEntriesImported = nutritionEntries.size,
+                    dailyActivityLogsImported = dailyActivityLogs.size,
                     mode = mode
                 )
             }
@@ -273,9 +280,10 @@ class BackupManager @Inject constructor(
          * - 5: adds day notes, day templates, wellness logs and tasks, body composition,
          *   nutrition, sleep scores, and all preferences (superseding the profile object).
          *
-         * `nutritionEntries` (the itemised nutrition ledger) was added without a bump: the field
-         * is defaulted and both readers use `ignoreUnknownKeys`, so older installs still restore
-         * these files — whereas version 6 would make them reject the backup outright.
+         * `nutritionEntries` (the itemised nutrition ledger) and `dailyActivityLogs` (whole-day
+         * steps, calories and HRV) were added without a bump: both fields are defaulted and both
+         * readers use `ignoreUnknownKeys`, so older installs still restore these files — whereas
+         * version 6 would make them reject the backup outright.
          */
         const val BACKUP_VERSION = 5
     }
@@ -316,6 +324,10 @@ data class ImportSummary(
     val bodyCompositionLogsImported: Int = 0,
     val nutritionLogsImported: Int = 0,
     val nutritionEntriesImported: Int = 0,
+    val dailyActivityLogsImported: Int = 0,
+    val liftSessionLogsImported: Int = 0,
+    val liftSetLogsImported: Int = 0,
+    val liftExerciseCatalogImported: Int = 0,
     val preferencesImported: Int = 0,
     val mode: ImportMode = ImportMode.MERGE
 ) {
@@ -324,5 +336,7 @@ data class ImportSummary(
         get() = trainingPlansImported + workoutLogsImported + rawWorkoutDataImported +
             sleepLogsImported + specialPeriodsImported + dayNotesImported +
             dayTemplatesImported + wellnessLogsImported + wellnessTasksImported +
-            bodyCompositionLogsImported + nutritionLogsImported + nutritionEntriesImported
+            bodyCompositionLogsImported + nutritionLogsImported + nutritionEntriesImported +
+            dailyActivityLogsImported + liftSessionLogsImported + liftSetLogsImported +
+            liftExerciseCatalogImported
 }

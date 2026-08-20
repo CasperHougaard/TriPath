@@ -50,6 +50,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tripath.data.model.BiologicalSex
+import com.tripath.data.model.ActivityLevel
+import com.tripath.data.model.NutritionGoal
+import com.tripath.data.model.ProjectionMode
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import kotlinx.coroutines.launch
@@ -80,6 +83,12 @@ fun ProfileEditorScreen(
     var birthDate by remember { mutableStateOf<LocalDate?>(null) }
     var showBirthDatePicker by remember { mutableStateOf(false) }
     var heightCm by remember { mutableStateOf("") }
+    var nutritionGoal by remember { mutableStateOf<NutritionGoal?>(null) }
+    var goalRatePctPerWeek by remember { mutableStateOf("") }
+    var rmrOverrideKcal by remember { mutableStateOf("") }
+    var activityLevel by remember { mutableStateOf<ActivityLevel?>(null) }
+    var sleepNeedHours by remember { mutableStateOf("") }
+    var projectionMode by remember { mutableStateOf<ProjectionMode?>(null) }
 
     // Initialize form fields from profile when loaded
     LaunchedEffect(uiState.userProfile) {
@@ -93,6 +102,12 @@ fun ProfileEditorScreen(
             biologicalSex = profile.biologicalSex
             birthDate = profile.birthDate
             heightCm = profile.heightCm?.toString() ?: ""
+            nutritionGoal = profile.nutritionGoal
+            goalRatePctPerWeek = profile.goalRatePctPerWeek?.toString() ?: ""
+            rmrOverrideKcal = profile.rmrOverrideKcal?.toString() ?: ""
+            activityLevel = profile.activityLevel
+            sleepNeedHours = profile.sleepNeedMinutes?.let { "%.1f".format(it / 60f) } ?: ""
+            projectionMode = profile.projectionMode
         }
     }
 
@@ -493,6 +508,137 @@ fun ProfileEditorScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = Spacing.md))
+
+            Text(
+                text = "Nutrition & Recovery",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(bottom = Spacing.sm)
+            )
+            Text(
+                text = "Drives the daily fuelling targets on the Nutrition screen and the fuelling-readiness signal.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                modifier = Modifier.padding(bottom = Spacing.md)
+            )
+
+            // Nutrition goal
+            Text(
+                text = "Goal",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                NutritionGoal.entries.forEach { goal ->
+                    FilterChip(
+                        selected = nutritionGoal == goal,
+                        onClick = {
+                            nutritionGoal = if (nutritionGoal == goal) null else goal
+                            goalRatePctPerWeek = ""
+                        },
+                        label = { Text(goal.label) }
+                    )
+                }
+            }
+            nutritionGoal?.let { goal ->
+                Text(
+                    text = goal.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Goal rate (percent of body mass per week)
+            if (nutritionGoal != null && nutritionGoal != NutritionGoal.MAINTAIN) {
+                OutlinedTextField(
+                    value = goalRatePctPerWeek,
+                    onValueChange = { newValue ->
+                        if (newValue.isEmpty() || newValue.toDoubleOrNull() != null) {
+                            goalRatePctPerWeek = newValue
+                        }
+                    },
+                    label = { Text("Rate (% body mass / week)") },
+                    placeholder = { Text("%.2f".format(nutritionGoal?.defaultRatePctPerWeek ?: 0.0)) },
+                    supportingText = {
+                        Text("Capped at %.1f%%/week".format(kotlin.math.abs(nutritionGoal?.maxRatePctPerWeek ?: 0.0)))
+                    },
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Measured RMR override
+            OutlinedTextField(
+                value = rmrOverrideKcal,
+                onValueChange = { newValue ->
+                    if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+                        rmrOverrideKcal = newValue
+                    }
+                },
+                label = { Text("Measured RMR (optional)") },
+                placeholder = { Text("kcal/day") },
+                supportingText = { Text("From indirect calorimetry. Overrides every prediction equation.") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Activity level fallback
+            Text(
+                text = "Activity level (used only without step data)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                ActivityLevel.entries.forEach { level ->
+                    FilterChip(
+                        selected = activityLevel == level,
+                        onClick = { activityLevel = if (activityLevel == level) null else level },
+                        label = { Text(level.label) }
+                    )
+                }
+            }
+
+            // Sleep need
+            OutlinedTextField(
+                value = sleepNeedHours,
+                onValueChange = { newValue ->
+                    if (newValue.isEmpty() || newValue.toDoubleOrNull() != null) {
+                        sleepNeedHours = newValue
+                    }
+                },
+                label = { Text("Sleep need") },
+                placeholder = { Text("8") },
+                supportingText = { Text("Nightly hours you need. Drives the sleep-debt signal.") },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            // Projection mode
+            Text(
+                text = "Future training assumption",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+                ProjectionMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = projectionMode == mode,
+                        onClick = { projectionMode = if (projectionMode == mode) null else mode },
+                        label = { Text(mode.label) }
+                    )
+                }
+            }
+            projectionMode?.let { mode ->
+                Text(
+                    text = mode.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
             Spacer(modifier = Modifier.height(Spacing.lg))
 
             // Save Button
@@ -510,7 +656,13 @@ fun ProfileEditorScreen(
                         goalDate = goalDate,
                         biologicalSex = biologicalSex,
                         birthDate = birthDate,
-                        heightCm = heightCm.toIntOrNull()
+                        heightCm = heightCm.toIntOrNull(),
+                        nutritionGoal = nutritionGoal,
+                        goalRatePctPerWeek = goalRatePctPerWeek.toFloatOrNull(),
+                        rmrOverrideKcal = rmrOverrideKcal.toIntOrNull(),
+                        activityLevel = activityLevel,
+                        sleepNeedMinutes = sleepNeedHours.toDoubleOrNull()?.let { (it * 60).toInt() },
+                        projectionMode = projectionMode
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),

@@ -327,6 +327,10 @@ class BackupRoundTripTest {
             "bodyCompositionLogs",
             "nutritionLogs",
             "nutritionEntries",
+            "dailyActivityLogs",
+            "liftSessionLogs",
+            "liftSetLogs",
+            "liftExerciseCatalog",
             "preferences"
         )
 

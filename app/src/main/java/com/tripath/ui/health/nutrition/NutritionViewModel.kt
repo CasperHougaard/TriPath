@@ -2,15 +2,23 @@ package com.tripath.ui.health.nutrition
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.NutritionMacro
 import com.tripath.data.local.repository.RecoveryRepository
+import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.UserProfile
+import com.tripath.domain.health.DailyNutritionTarget
+import com.tripath.domain.health.EnergyAvailabilityResult
+import com.tripath.domain.health.FuelAnalytics
 import com.tripath.domain.health.HealthReference
 import com.tripath.ui.health.HealthTimePeriod
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -18,9 +26,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 
 data class NutritionUiState(
@@ -38,15 +49,22 @@ data class NutritionUiState(
     val userCalorieTarget: Float? = null,
     // Demographics-derived fallbacks/suggestions (null when profile is incomplete).
     val proteinTarget: HealthReference.Band? = null,
-    val maintenanceCalories: Double? = null
+    val maintenanceCalories: Double? = null,
+    /** Goal- and training-load-aware target for today from [FuelAnalytics]. Null until settled. */
+    val dynamicTarget: DailyNutritionTarget? = null,
+    /** 7-day rolling energy availability — a fuelling-readiness screening signal, not a diagnosis. */
+    val energyAvailability: EnergyAvailabilityResult = EnergyAvailabilityResult.UNKNOWN
 ) {
-    /** Effective protein target for the progress bar: user's value, else the derived minimum. */
+    /**
+     * Effective protein target for the progress bar: the user's value, else the load-aware target,
+     * else the demographics-derived minimum.
+     */
     val effectiveProteinTargetG: Double?
-        get() = userProteinTargetG?.toDouble() ?: proteinTarget?.min
+        get() = userProteinTargetG?.toDouble() ?: dynamicTarget?.proteinG ?: proteinTarget?.min
 
-    /** Effective calorie target: user's value, else the derived maintenance estimate. */
+    /** Effective calorie target: the user's value, else the load-aware target, else maintenance. */
     val effectiveCalorieTarget: Double?
-        get() = userCalorieTarget?.toDouble() ?: maintenanceCalories
+        get() = userCalorieTarget?.toDouble() ?: dynamicTarget?.kcal ?: maintenanceCalories
 }
 
 /**
@@ -56,9 +74,13 @@ data class NutritionUiState(
 fun softProgressFraction(value: Double, target: Double?): Float =
     if (target != null && target > 0) (value / target).coerceIn(0.0, 1.0).toFloat() else 0f
 
+/** History window fed to [FuelAnalytics.build] — enough for its adaptive correction to settle. */
+private const val FUEL_WINDOW_DAYS = 21L
+
 @HiltViewModel
 class NutritionViewModel @Inject constructor(
     private val recoveryRepository: RecoveryRepository,
+    private val trainingRepository: TrainingRepository,
     private val preferencesManager: PreferencesManager
 ) : ViewModel() {
 
@@ -69,18 +91,55 @@ class NutritionViewModel @Inject constructor(
     /** Ledger id of the most recent add, so the Snackbar can undo exactly that one. */
     private var lastEntryId: Long? = null
 
+    /** Bundled once so the six sources below fit within [combine]'s five-argument overload. */
+    private data class FuelInputs(
+        val workouts: List<WorkoutLog>,
+        val bodyLogs: List<BodyCompositionLog>,
+        val dailyActivity: List<DailyActivityLog>,
+        val profile: UserProfile?
+    )
+
     val uiState: StateFlow<NutritionUiState> = combine(
         recoveryRepository.getNutritionLogs(),
         _selectedPeriod,
-        recoveryRepository.getBodyCompositionLogs(),
-        preferencesManager.userProfileFlow
-    ) { logs, period, bodyLogs, profile ->
+        combine(
+            trainingRepository.getAllWorkoutLogs(),
+            recoveryRepository.getBodyCompositionLogs(),
+            recoveryRepository.getDailyActivityLogs(),
+            preferencesManager.userProfileFlow
+        ) { workouts, bodyLogs, dailyActivity, profile ->
+            FuelInputs(workouts, bodyLogs, dailyActivity, profile)
+        }
+    ) { logs, period, fuelInputs ->
         val cutoff = today.minusDays(period.days)
         val filtered = logs.filter { it.date >= cutoff }.sortedByDescending { it.date }
         fun avg(selector: (NutritionLog) -> Double?): Double? =
             filtered.mapNotNull(selector).takeIf { it.isNotEmpty() }?.average()
 
+        val bodyLogs = fuelInputs.bodyLogs
+        val profile = fuelInputs.profile
         val weightKg = bodyLogs.firstOrNull { it.weightKg != null }?.weightKg
+
+        // 21 days is enough history for AdaptiveExpenditure's correction ratio to settle without
+        // costing much on days the athlete hasn't opened the Health tab in a while.
+        val windowStart = today.minusDays(FUEL_WINDOW_DAYS)
+        val weightByDate: Map<LocalDate, Double> = bodyLogs
+            .filter { it.weightKg != null }
+            .groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
+            .mapValues { (_, dayLogs) -> dayLogs.maxByOrNull { it.timestamp }!!.weightKg!! }
+        val nutritionByDate = logs.associate { it.date to (it.energyKcal to it.proteinG) }
+        val fuel = FuelAnalytics.build(
+            workouts = fuelInputs.workouts,
+            nutritionByDate = nutritionByDate,
+            bodyComposition = bodyLogs,
+            dailyActivity = fuelInputs.dailyActivity,
+            profile = profile,
+            plannedTssByDate = emptyMap(),
+            windowStart = windowStart,
+            today = today,
+            weightByDate = weightByDate
+        )
+
         NutritionUiState(
             today = logs.firstOrNull { it.date == today },
             todayDate = today,
@@ -98,9 +157,12 @@ class NutritionViewModel @Inject constructor(
                 age = profile?.ageOn(),
                 weightKg = weightKg,
                 heightCm = profile?.heightCm
-            )
+            ),
+            dynamicTarget = fuel.today?.target,
+            energyAvailability = fuel.rollingEnergyAvailability
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), NutritionUiState())
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), NutritionUiState())
 
     /** The day whose itemised log is open, or null when no day sheet is showing. */
     val selectedDay: StateFlow<LocalDate?> = _selectedDay

@@ -4,25 +4,22 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.model.WorkoutType
 
 /**
- * Estimates daily energy expenditure so intake can be compared against a *load-adjusted*
- * requirement — the basis for the "am I eating enough for my training?" view.
+ * Estimates the energy cost of individual workouts — the "training burn" half of expenditure.
  *
- * Model: Total Daily Energy Expenditure (TDEE) = resting baseline + training burn.
- *  - Resting baseline = BMR (Mifflin–St Jeor via [HealthReference.basalMetabolicRate]) ×
- *    [BASELINE_ACTIVITY_FACTOR] (1.2, the standard sedentary multiplier for non-exercise daily
- *    living). We deliberately do NOT reuse [HealthReference.maintenanceCalories]'s 1.55 factor
- *    here, because that already bakes in an assumed training load — adding measured workout burn
- *    on top of it would double-count the exercise.
- *  - Training burn = the sum of each workout's *active* calories. Uses [WorkoutLog.calories]
- *    (active kcal recorded by Health Connect) when present, otherwise a MET-based estimate from
- *    the session duration and the athlete's body weight.
+ * Training burn is the sum of each workout's *active* calories: [WorkoutLog.calories] (recorded by
+ * Health Connect) when present, otherwise a MET-based estimate from session duration and body
+ * weight. Using the active portion only (MET − 1) means the result can be added to a resting
+ * baseline without counting rest twice.
+ *
+ * **The rest of the expenditure model lives in [MetabolicModel].** This object used to own the
+ * whole thing — resting rate × a fixed 1.2 multiplier, plus this burn — but that model had no
+ * thermic effect of food, no way to tell a desk day from an active one, and no correction against
+ * what the scale actually did. [MetabolicModel] and [AdaptiveExpenditure] replaced it; this is the
+ * piece that survived unchanged because it was already right.
  *
  * All figures are approximations for trend/awareness, not medical or lab-grade values.
  */
 object EnergyBalanceCalculator {
-
-    /** Sedentary multiplier applied to BMR for the non-exercise daily baseline. */
-    const val BASELINE_ACTIVITY_FACTOR = 1.2
 
     /**
      * Approximate MET (metabolic equivalent of task) per workout type, used only as a fallback
@@ -56,14 +53,4 @@ object EnergyBalanceCalculator {
      */
     fun workoutActiveCalories(log: WorkoutLog, weightKg: Double?): Double? =
         log.calories?.toDouble() ?: estimateActiveCalories(log.type, log.durationMinutes, weightKg)
-
-    /** Resting baseline expenditure (kcal/day) = BMR × sedentary factor. Null if BMR is unknown. */
-    fun restingBaseline(bmr: Double?): Double? = bmr?.let { it * BASELINE_ACTIVITY_FACTOR }
-
-    /**
-     * Total daily energy expenditure = resting baseline + summed training burn for the day.
-     * Returns null when the resting baseline can't be computed (incomplete demographics/weight).
-     */
-    fun dailyExpenditure(bmr: Double?, trainingBurnKcal: Double): Double? =
-        restingBaseline(bmr)?.let { it + trainingBurnKcal }
 }

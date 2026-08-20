@@ -66,10 +66,57 @@ data class UserProfile(
     val proteinTargetG: Float? = null,
 
     /** Optional daily calorie target in kcal — progress only shown when set. */
-    val calorieTarget: Float? = null
+    val calorieTarget: Float? = null,
+
+    /** What the athlete is trying to do with body mass. Drives every energy and macro target. */
+    val nutritionGoal: NutritionGoal? = null,
+
+    /**
+     * Target rate of body-mass change, as a percentage of body mass per week (negative to lose).
+     * Always read through [NutritionGoal.clampRate] so a rate left over from a previous goal
+     * cannot survive a goal change.
+     */
+    val goalRatePctPerWeek: Float? = null,
+
+    /**
+     * A *measured* resting metabolic rate (indirect calorimetry), in kcal/day. Overrides every
+     * prediction equation — see [com.tripath.domain.health.MetabolicModel.restingMetabolicRate].
+     */
+    val rmrOverrideKcal: Int? = null,
+
+    /** Non-exercise activity level, used only on days with no step data. */
+    val activityLevel: ActivityLevel? = null,
+
+    /** Nightly sleep the athlete needs, in minutes. Drives the rolling sleep-debt term. */
+    val sleepNeedMinutes: Int? = null,
+
+    /** Where forward-looking figures get their future training from. */
+    val projectionMode: ProjectionMode? = null
 ) {
     /** Age in whole years as of [today], or null when [birthDate] is unset. */
     fun ageOn(today: LocalDate = LocalDate.now()): Int? =
         birthDate?.let { java.time.Period.between(it, today).years }
+
+    /** The active goal, defaulting to maintenance so the fuel model always has something to size to. */
+    val effectiveGoal: NutritionGoal get() = nutritionGoal ?: NutritionGoal.DEFAULT
+
+    /** The goal rate, clamped to what [effectiveGoal] permits. Percent of body mass per week. */
+    val effectiveGoalRatePctPerWeek: Double
+        get() = effectiveGoal.clampRate(goalRatePctPerWeek?.toDouble())
+
+    val effectiveActivityLevel: ActivityLevel get() = activityLevel ?: ActivityLevel.DEFAULT
+
+    val effectiveProjectionMode: ProjectionMode get() = projectionMode ?: ProjectionMode.DEFAULT
+
+    /** Nightly sleep need in minutes, defaulting to 8 h. */
+    val effectiveSleepNeedMinutes: Int get() = sleepNeedMinutes ?: DEFAULT_SLEEP_NEED_MINUTES
+
+    companion object {
+        /**
+         * 8 hours. Milewski et al. (2014) found under 8 h associated with roughly 1.7× the injury
+         * rate in athletes; Mah et al. (2011) found performance gains from extending toward it.
+         */
+        const val DEFAULT_SLEEP_NEED_MINUTES = 480
+    }
 }
 

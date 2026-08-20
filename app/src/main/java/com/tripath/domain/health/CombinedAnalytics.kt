@@ -1,6 +1,7 @@
 package com.tripath.domain.health
 
 import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.WorkoutLog
@@ -19,6 +20,10 @@ data class AnalysisDay(
     val date: LocalDate,
     val tss: Int,
     val ctl: Double,
+    /** Banister Acute Training Load (fatigue) on this day. */
+    val atl: Double,
+    /** Training Stress Balance (form) = ctl − atl. */
+    val tsb: Double,
     val intakeKcal: Double?,
     val proteinG: Double?,
     /** Forward-filled last known body weight on/before this day. */
@@ -28,7 +33,19 @@ data class AnalysisDay(
     /** intake − expenditure; null when either side is missing. */
     val balanceKcal: Double?,
     val sleepMinutes: Int?,
-    val sleepScore: Int?
+    val sleepScore: Int?,
+    /** `rmr x neatFactor + exercise`, after the adaptive correction. The spine of the fuel model. */
+    val nonTefExpenditureKcal: Double? = null,
+    /** Which equation produced the resting rate behind [nonTefExpenditureKcal]. */
+    val rmrSource: RmrSource = RmrSource.UNAVAILABLE,
+    /** Non-exercise steps that set the day's NEAT multiplier, or null when none were recorded. */
+    val neatSteps: Int? = null,
+    val targetKcal: Double? = null,
+    val targetProteinG: Double? = null,
+    val targetCarbsG: Double? = null,
+    val targetFatG: Double? = null,
+    /** kcal/kg fat-free mass. A screening signal — see [EnergyAvailability]. */
+    val energyAvailability: Double? = null
 )
 
 /**
@@ -38,6 +55,12 @@ data class AnalysisDay(
  */
 data class CombinedAnalysis(
     val series: Map<AnalysisMetric, List<Pair<Long, Double>>> = emptyMap(),
+    /**
+     * The per-day rows the summary stats were derived from, oldest first. The UI only needs the
+     * aggregates; this is here so consumers that want the raw join (the LiftPath share provider)
+     * do not have to reimplement it.
+     */
+    val days: List<AnalysisDay> = emptyList(),
     val hasData: Boolean = false,
     // Fuel balance
     val avgIntakeKcal: Double? = null,
@@ -62,7 +85,13 @@ data class CombinedAnalysis(
     val latestWeightKg: Double? = null,
     // Load
     val avgTss: Double? = null,
-    val latestCtl: Double? = null
+    val latestCtl: Double? = null,
+    /**
+     * The full fuel model behind the per-day figures above. Held whole rather than flattened so
+     * the Fuel screens can show *why* a number is what it is — which equation produced the resting
+     * rate, how settled the adaptive estimate is, what the warnings were.
+     */
+    val fuel: FuelAnalysis = FuelAnalysis()
 )
 
 /**
@@ -83,7 +112,11 @@ object CombinedAnalytics {
         profile: UserProfile?,
         periodDays: Long,
         today: LocalDate = LocalDate.now(),
-        zone: ZoneId = ZoneId.systemDefault()
+        zone: ZoneId = ZoneId.systemDefault(),
+        /** Whole-day steps, calories and HRV. Empty is fine — NEAT falls back to the profile. */
+        dailyActivity: List<DailyActivityLog> = emptyList(),
+        /** Future load from [com.tripath.domain.ProjectionSource]. Feeds tomorrow-aware carb targets. */
+        plannedTssByDate: Map<LocalDate, Int> = emptyMap()
     ): CombinedAnalysis {
         val workouts = allWorkouts.filter { !it.isIgnored }
         val windowStart = today.minusDays(periodDays)
@@ -98,7 +131,7 @@ object CombinedAnalytics {
                 seriesEnd = today,
                 actualUntil = today
             )
-        val ctlByDate = perfSeries.associate { (d, m) -> d to m.ctl }
+        val metricsByDate: Map<LocalDate, PerformanceMetrics> = perfSeries.toMap()
 
         val workoutsByDate: Map<LocalDate, List<WorkoutLog>> = workouts.groupBy { it.date }
         val tssByDate: Map<LocalDate, Int> = workoutsByDate.mapValues { (_, logs) ->
@@ -118,11 +151,23 @@ object CombinedAnalytics {
             .groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
             .mapValues { (_, logs) -> logs.maxByOrNull { it.timestamp }!!.weightKg!! }
 
-        // BMR demographic inputs are constant across the window; only weight forward-fills.
-        val sex = profile?.biologicalSex
-        val age = profile?.ageOn(today)
-        val heightCm = profile?.heightCm
         val userProteinTarget = profile?.proteinTargetG?.toDouble()
+
+        // The whole energy model — resting rate, NEAT, adaptive correction, targets — lives in
+        // FuelAnalytics so that the Health tab, the Coach tab and the LiftPath bridge cannot each
+        // arrive at a slightly different TDEE.
+        val fuel = FuelAnalytics.build(
+            workouts = workouts,
+            nutritionByDate = nutritionByDate.mapValues { (_, log) -> log.energyKcal to log.proteinG },
+            bodyComposition = bodyComposition,
+            dailyActivity = dailyActivity,
+            profile = profile,
+            plannedTssByDate = plannedTssByDate,
+            windowStart = windowStart,
+            today = today,
+            weightByDate = weightByDate
+        )
+        val fuelByDate = fuel.days.associateBy { it.date }
 
         // Seed the forward-filled weight with the most recent reading on/before the window start.
         var lastWeight: Double? = weightByDate
@@ -139,24 +184,32 @@ object CombinedAnalytics {
             val intake = nut?.energyKcal
             val protein = nut?.proteinG
             val tss = tssByDate[cursor] ?: 0
-            val ctl = ctlByDate[cursor] ?: 0.0
-            val burn = (workoutsByDate[cursor] ?: emptyList())
-                .sumOf { EnergyBalanceCalculator.workoutActiveCalories(it, weight) ?: 0.0 }
-            val bmr = HealthReference.basalMetabolicRate(sex, age, weight, heightCm)
-            val expenditure = EnergyBalanceCalculator.dailyExpenditure(bmr, burn)
+            val metrics = metricsByDate[cursor]
+            val fuelDay = fuelByDate[cursor]
+            val expenditure = fuelDay?.tdeeKcal
             val balance = if (intake != null && expenditure != null) intake - expenditure else null
             val night = sleepByDate[cursor]
             days += AnalysisDay(
                 date = cursor,
                 tss = tss,
-                ctl = ctl,
+                ctl = metrics?.ctl ?: 0.0,
+                atl = metrics?.atl ?: 0.0,
+                tsb = metrics?.tsb ?: 0.0,
                 intakeKcal = intake,
                 proteinG = protein,
                 weightKg = weight,
                 expenditureKcal = expenditure,
                 balanceKcal = balance,
                 sleepMinutes = night?.durationMinutes,
-                sleepScore = night?.sleepScore
+                sleepScore = night?.sleepScore,
+                nonTefExpenditureKcal = fuelDay?.nonTefExpenditureKcal,
+                rmrSource = fuelDay?.rmrSource ?: RmrSource.UNAVAILABLE,
+                neatSteps = fuelDay?.nonExerciseSteps,
+                targetKcal = fuelDay?.target?.kcal,
+                targetProteinG = fuelDay?.target?.proteinG,
+                targetCarbsG = fuelDay?.target?.carbsG,
+                targetFatG = fuelDay?.target?.fatG,
+                energyAvailability = fuelDay?.energyAvailability?.kcalPerKgFfm
             )
             cursor = cursor.plusDays(1)
         }
@@ -190,12 +243,16 @@ object CombinedAnalytics {
         val trainingTss = days.filter { it.tss > 0 }.map { it.tss.toDouble() }
         val windowWeights = days.mapNotNull { weightByDate[it.date] } // ascending by date
 
-        val canComputeBalance =
-            HealthReference.basalMetabolicRate(sex, age, lastWeight, heightCm) != null
-        val proteinTarget = userProteinTarget ?: HealthReference.proteinTargetGrams(lastWeight)?.min
+        val canComputeBalance = fuel.rmr.kcal != null
+        // Precedence: an explicit user target, then the goal-aware target from the fuel model,
+        // then the generic 1.6 g/kg floor for someone with no goal set and no scan.
+        val proteinTarget = userProteinTarget
+            ?: fuel.today?.target?.proteinG
+            ?: HealthReference.proteinTargetGrams(lastWeight)?.min
 
         return CombinedAnalysis(
             series = series,
+            days = days,
             hasData = series.isNotEmpty(),
             avgIntakeKcal = intakeDays.averageOrNull(),
             avgExpenditureKcal = expenditureDays.averageOrNull(),
@@ -214,7 +271,8 @@ object CombinedAnalytics {
             weightDeltaKg = if (windowWeights.size >= 2) windowWeights.last() - windowWeights.first() else null,
             latestWeightKg = lastWeight,
             avgTss = trainingTss.averageOrNull(),
-            latestCtl = perfSeries.lastOrNull()?.second?.ctl
+            latestCtl = perfSeries.lastOrNull()?.second?.ctl,
+            fuel = fuel
         )
     }
 

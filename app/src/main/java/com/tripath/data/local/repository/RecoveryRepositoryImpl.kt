@@ -5,10 +5,12 @@ import android.content.Context
 import androidx.room.withTransaction
 import com.tripath.data.local.database.AppDatabase
 import com.tripath.data.local.database.dao.BodyCompositionDao
+import com.tripath.data.local.database.dao.DailyActivityDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.entities.BodyCompositionLog
+import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionEntryKind
 import com.tripath.data.local.database.entities.NutritionLog
@@ -24,6 +26,7 @@ import javax.inject.Inject
 
 class RecoveryRepositoryImpl @Inject constructor(
     private val bodyCompositionDao: BodyCompositionDao,
+    private val dailyActivityDao: DailyActivityDao,
     private val sleepLogDao: SleepLogDao,
     private val nutritionLogDao: NutritionLogDao,
     private val nutritionEntryDao: NutritionEntryDao,
@@ -40,6 +43,9 @@ class RecoveryRepositoryImpl @Inject constructor(
 
     override fun getBodyCompositionLogs(): Flow<List<BodyCompositionLog>> =
         bodyCompositionDao.getAllLogs()
+
+    override fun getDailyActivityLogs(): Flow<List<DailyActivityLog>> =
+        dailyActivityDao.getAll()
 
     override fun getAllBodyCompositionLogsIncludingIgnored(): Flow<List<BodyCompositionLog>> =
         bodyCompositionDao.getAllLogsIncludingIgnored()

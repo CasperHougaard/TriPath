@@ -15,8 +15,8 @@ android {
         applicationId = "com.tripath"
         minSdk = 33
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -101,6 +101,24 @@ dependencies {
     // Glance (home-screen app widgets)
     implementation(libs.androidx.glance.appwidget)
     implementation(libs.androidx.glance.material3)
+
+    // Guava (ListenableFuture — CameraX's ProcessCameraProvider needs the real classes, not the
+    // empty listenablefuture shim Gradle picks by default)
+    implementation(libs.guava)
+
+    // CameraX (barcode scan preview + frame analysis)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+
+    // ML Kit (on-device barcode decoding)
+    implementation(libs.mlkit.barcode.scanning)
+
+    // Networking (Open Food Facts barcode lookup)
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.kotlinx.serialization)
+    implementation(libs.okhttp.core)
 
     // Testing
     testImplementation(libs.junit)

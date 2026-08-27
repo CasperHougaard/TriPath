@@ -13,6 +13,10 @@ import com.tripath.data.local.database.entities.DailyWellnessLog
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.domain.health.AnalysisDay
 import com.tripath.domain.health.CombinedAnalytics
+import com.tripath.domain.strain.DisciplineVerdict
+import com.tripath.domain.strain.ReadinessDriver
+import com.tripath.domain.strain.ReadinessService
+import com.tripath.domain.strain.StrainChannel
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -20,6 +24,9 @@ import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.time.temporal.ChronoUnit
@@ -46,6 +53,7 @@ class TriPathShareProvider : ContentProvider() {
         const val CODE_HANDSHAKE = 1
         const val CODE_DAYS = 2
         const val CODE_WORKOUTS = 3
+        const val CODE_READINESS = 4
 
         /** Range served when the caller does not ask for one. Covers LiftPath's fatigue window. */
         const val DEFAULT_RANGE_DAYS = 28L
@@ -63,12 +71,14 @@ class TriPathShareProvider : ContentProvider() {
     interface ShareEntryPoint {
         fun appDatabase(): AppDatabase
         fun preferencesManager(): PreferencesManager
+        fun readinessService(): ReadinessService
     }
 
     private val uriMatcher = UriMatcher(UriMatcher.NO_MATCH).apply {
         addURI(TriPathShareContract.AUTHORITY, TriPathShareContract.PATH_HANDSHAKE, CODE_HANDSHAKE)
         addURI(TriPathShareContract.AUTHORITY, TriPathShareContract.PATH_DAYS, CODE_DAYS)
         addURI(TriPathShareContract.AUTHORITY, TriPathShareContract.PATH_WORKOUTS, CODE_WORKOUTS)
+        addURI(TriPathShareContract.AUTHORITY, TriPathShareContract.PATH_READINESS, CODE_READINESS)
     }
 
     override fun onCreate(): Boolean = true
@@ -92,6 +102,7 @@ class TriPathShareProvider : ContentProvider() {
                 CODE_HANDSHAKE -> handshakeCursor(entryPoint)
                 CODE_DAYS -> daysCursor(entryPoint, uri)
                 CODE_WORKOUTS -> workoutsCursor(entryPoint, uri)
+                CODE_READINESS -> readinessCursor(entryPoint)
                 else -> throw IllegalArgumentException("Unknown URI: $uri")
             }
         } catch (e: IllegalArgumentException) {
@@ -105,7 +116,7 @@ class TriPathShareProvider : ContentProvider() {
     }
 
     override fun getType(uri: Uri): String? = when (uriMatcher.match(uri)) {
-        CODE_HANDSHAKE, CODE_DAYS, CODE_WORKOUTS ->
+        CODE_HANDSHAKE, CODE_DAYS, CODE_WORKOUTS, CODE_READINESS ->
             "vnd.android.cursor.dir/vnd.${TriPathShareContract.AUTHORITY}"
         else -> null
     }
@@ -135,6 +146,8 @@ class TriPathShareProvider : ContentProvider() {
             addRow(
                 arrayOf(
                     TriPathShareContract.CONTRACT_VERSION,
+                    TriPathShareContract.schemaHash(),
+                    TriPathShareContract.CAPABILITIES.joinToString(","),
                     BuildConfig.VERSION_NAME,
                     workoutCount,
                     latestWorkout?.toString(),
@@ -188,7 +201,14 @@ class TriPathShareProvider : ContentProvider() {
         day.sleepScore,
         wellness?.hrvRmssd,
         wellness?.sorenessIndex,
-        wellness?.moodIndex
+        wellness?.moodIndex,
+        day.targetKcal,
+        day.targetProteinG,
+        day.targetCarbsG,
+        day.targetFatG,
+        day.rmrSource.name,
+        day.energyAvailability,
+        day.neatSteps
     )
 
     private fun workoutsCursor(entryPoint: ShareEntryPoint, uri: Uri): Cursor = runBlocking {
@@ -223,6 +243,105 @@ class TriPathShareProvider : ContentProvider() {
                 }
         }
     }
+
+
+    /**
+     * The current readiness verdict, computed by the same [ReadinessService] the Coach screen uses.
+     *
+     * Deliberately not a cached snapshot: readiness depends on how long ago the last session was,
+     * so a value stored this morning is already stale by evening. Computing on demand costs one
+     * pass over a bounded window and keeps both apps looking at the same number.
+     */
+    private fun readinessCursor(entryPoint: ShareEntryPoint): Cursor = runBlocking {
+        val assessment = entryPoint.readinessService().currentReadiness()
+        val strain = assessment.strain
+
+        fun freshness(channel: StrainChannel): Int? = strain[channel]?.freshness
+
+        val hoursToFresh = strain.channels.values
+            .mapNotNull { state -> state.hoursToFresh?.let { state.channel.name to it } }
+            .toMap()
+
+        MatrixCursor(TriPathShareContract.Readiness.COLUMNS).apply {
+            addRow(
+                arrayOf(
+                    assessment.score,
+                    assessment.band.name,
+                    assessment.action.name,
+                    freshness(StrainChannel.LOWER_IMPACT),
+                    freshness(StrainChannel.LOWER_MUSCULAR),
+                    freshness(StrainChannel.UPPER_MUSCULAR),
+                    freshness(StrainChannel.SYSTEMIC),
+                    encodeJson(hoursToFresh),
+                    encodeDrivers(assessment.drivers),
+                    encodeVerdicts(assessment.disciplineVerdicts),
+                    encodeJson(strain.muscleFreshness),
+                    assessment.guidance,
+                    assessment.weeklyLoadRampPct,
+                    System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    /**
+     * Payloads carry a `v` field alongside their data.
+     *
+     * The schema hash covers column names and types but cannot see inside a JSON string, so a
+     * reshaped payload would otherwise pass every drift check and fail at parse time on the other
+     * side. The version here plus the matching capability token is what guards that gap.
+     */
+    private fun encodeDrivers(drivers: List<ReadinessDriver>): String? = runCatching {
+        buildJsonObject {
+            put("v", JsonPrimitive(TriPathShareContract.JSON_PAYLOAD_VERSION))
+            put(
+                "items",
+                buildJsonArray {
+                    drivers.forEach { driver ->
+                        add(
+                            buildJsonObject {
+                                put("label", JsonPrimitive(driver.label))
+                                put("detail", JsonPrimitive(driver.detail))
+                                put("impact", JsonPrimitive(driver.impact))
+                            }
+                        )
+                    }
+                }
+            )
+        }.toString()
+    }.getOrNull()
+
+    private fun encodeVerdicts(verdicts: List<DisciplineVerdict>): String? = runCatching {
+        buildJsonObject {
+            put("v", JsonPrimitive(TriPathShareContract.JSON_PAYLOAD_VERSION))
+            put(
+                "items",
+                buildJsonArray {
+                    verdicts.forEach { verdict ->
+                        add(
+                            buildJsonObject {
+                                put("discipline", JsonPrimitive(verdict.discipline.name))
+                                put("action", JsonPrimitive(verdict.action.name))
+                                put("reason", JsonPrimitive(verdict.reason))
+                            }
+                        )
+                    }
+                }
+            )
+        }.toString()
+    }.getOrNull()
+
+    private fun encodeJson(values: Map<String, Number>): String? = runCatching {
+        buildJsonObject {
+            put("v", JsonPrimitive(TriPathShareContract.JSON_PAYLOAD_VERSION))
+            put(
+                "items",
+                buildJsonObject {
+                    values.forEach { (key, value) -> put(key, JsonPrimitive(value)) }
+                }
+            )
+        }.toString()
+    }.getOrNull()
 
     // ---- Helpers -----------------------------------------------------------------------------
 

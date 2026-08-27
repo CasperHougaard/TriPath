@@ -9,6 +9,8 @@ import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
+import com.tripath.data.local.database.dao.NutritionPresetDao
+import com.tripath.data.local.database.dao.ScannedFoodDao
 import com.tripath.data.local.database.dao.WellnessDao
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
@@ -40,7 +42,9 @@ class BackupManager @Inject constructor(
     private val bodyCompositionDao: BodyCompositionDao,
     private val nutritionLogDao: NutritionLogDao,
     private val nutritionEntryDao: NutritionEntryDao,
-    private val dailyActivityDao: DailyActivityDao
+    private val nutritionPresetDao: NutritionPresetDao,
+    private val dailyActivityDao: DailyActivityDao,
+    private val scannedFoodDao: ScannedFoodDao
 ) {
     private val json = Json {
         prettyPrint = true
@@ -89,7 +93,9 @@ class BackupManager @Inject constructor(
                 bodyCompositionLogs = bodyCompositionDao.getAllOnce().map { it.toDto() },
                 nutritionLogs = nutritionLogDao.getAllOnce().map { it.toDto() },
                 nutritionEntries = nutritionEntryDao.getAllOnce().map { it.toDto() },
+                nutritionPresets = nutritionPresetDao.getAllOnce().map { it.toDto() },
                 dailyActivityLogs = dailyActivityDao.getAllOnce().map { it.toDto() },
+                scannedFoods = scannedFoodDao.getAllOnce().map { it.toDto() },
                 preferences = preferences,
                 // Version 5+ carries the profile inside `preferences`.
                 userProfile = null
@@ -201,8 +207,14 @@ class BackupManager @Inject constructor(
                 val nutritionEntries = backupData.nutritionEntries.map { it.toEntity() }
                 nutritionEntryDao.insertAll(nutritionEntries)
 
+                val nutritionPresets = backupData.nutritionPresets.map { it.toEntity() }
+                nutritionPresetDao.insertAll(nutritionPresets)
+
                 val dailyActivityLogs = backupData.dailyActivityLogs.map { it.toEntity() }
                 dailyActivityDao.upsertAll(dailyActivityLogs)
+
+                val scannedFoods = backupData.scannedFoods.map { it.toEntity() }
+                scannedFoods.forEach { scannedFoodDao.upsert(it) }
 
                 ImportSummary(
                     trainingPlansImported = trainingPlans.size,
@@ -218,7 +230,9 @@ class BackupManager @Inject constructor(
                     bodyCompositionLogsImported = bodyCompositionLogs.size,
                     nutritionLogsImported = nutritionLogs.size,
                     nutritionEntriesImported = nutritionEntries.size,
+                    nutritionPresetsImported = nutritionPresets.size,
                     dailyActivityLogsImported = dailyActivityLogs.size,
+                    scannedFoodsImported = scannedFoods.size,
                     mode = mode
                 )
             }
@@ -324,10 +338,12 @@ data class ImportSummary(
     val bodyCompositionLogsImported: Int = 0,
     val nutritionLogsImported: Int = 0,
     val nutritionEntriesImported: Int = 0,
+    val nutritionPresetsImported: Int = 0,
     val dailyActivityLogsImported: Int = 0,
     val liftSessionLogsImported: Int = 0,
     val liftSetLogsImported: Int = 0,
     val liftExerciseCatalogImported: Int = 0,
+    val scannedFoodsImported: Int = 0,
     val preferencesImported: Int = 0,
     val mode: ImportMode = ImportMode.MERGE
 ) {
@@ -337,6 +353,6 @@ data class ImportSummary(
             sleepLogsImported + specialPeriodsImported + dayNotesImported +
             dayTemplatesImported + wellnessLogsImported + wellnessTasksImported +
             bodyCompositionLogsImported + nutritionLogsImported + nutritionEntriesImported +
-            dailyActivityLogsImported + liftSessionLogsImported + liftSetLogsImported +
-            liftExerciseCatalogImported
+            nutritionPresetsImported + dailyActivityLogsImported + liftSessionLogsImported +
+            liftSetLogsImported + liftExerciseCatalogImported + scannedFoodsImported
 }

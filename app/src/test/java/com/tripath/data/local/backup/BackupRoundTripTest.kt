@@ -7,7 +7,9 @@ import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionEntryKind
 import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.NutritionPreset
 import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.ScannedFoodCache
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.SpecialPeriodType
@@ -217,6 +219,48 @@ class BackupRoundTripTest {
     }
 
     @Test
+    fun `nutrition preset survives round trip`() {
+        val original = NutritionPreset(
+            id = "preset-1",
+            label = "Protein shake",
+            kcal = 220.0,
+            proteinG = 40.0,
+            carbsG = null,
+            fatG = 5.5,
+            createdAt = 1_700_000_000_000
+        )
+
+        val restored = roundTrip(
+            AppBackupData(timestamp = 0L, nutritionPresets = listOf(original.toDto()))
+        ).nutritionPresets.single().toEntity()
+
+        assertEquals(original, restored)
+        // A preset saved without carbs must not come back as a genuine zero.
+        assertNull(restored.carbsG)
+    }
+
+    @Test
+    fun `scanned food survives round trip`() {
+        val original = ScannedFoodCache(
+            barcode = "5000112637922",
+            name = "Oat bar",
+            kcalPer100g = 384.0,
+            proteinPer100g = null,
+            // A row the athlete corrected by hand is the one it would hurt most to lose, since a
+            // later lookup will never overwrite it back into place.
+            isManualOverride = true,
+            updatedAt = 1_700_000_000_000
+        )
+
+        val restored = roundTrip(
+            AppBackupData(timestamp = 0L, scannedFoods = listOf(original.toDto()))
+        ).scannedFoods.single().toEntity()
+
+        assertEquals(original, restored)
+        assertNull(restored.proteinPer100g)
+    }
+
+    @Test
     fun `wellness log and task survive round trip`() {
         val log = DailyWellnessLog(
             date = LocalDate.of(2026, 4, 4),
@@ -327,10 +371,12 @@ class BackupRoundTripTest {
             "bodyCompositionLogs",
             "nutritionLogs",
             "nutritionEntries",
+            "nutritionPresets",
             "dailyActivityLogs",
             "liftSessionLogs",
             "liftSetLogs",
             "liftExerciseCatalog",
+            "scannedFoods",
             "preferences"
         )
 

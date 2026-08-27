@@ -286,7 +286,7 @@ class NutritionTargetsTest {
 
     private fun week(loads: List<DayLoad>) = loads.mapIndexed { i, l ->
         val d = date.plusDays(i.toLong())
-        DayTargetInput(d, expenditureFor(l), l.copy(date = d))
+        DayTargetInput(d, expenditureFor(l), l.copy(date = d), bodyMassKg = mass, ffmKg = ffm)
     }
 
     private fun weeklyBudget(loads: List<DayLoad>, goal: NutritionGoal, rate: Double): Double =
@@ -299,7 +299,7 @@ class NutritionTargetsTest {
 
     @Test
     fun `a periodised week still sums to the week's energy budget`() {
-        val targets = NutritionTargets.forWeek(week(trainingWeek), NutritionGoal.MAINTAIN, 0.0, mass, ffm)
+        val targets = NutritionTargets.forWeek(week(trainingWeek), NutritionGoal.MAINTAIN, 0.0)
         assertEquals(7, targets.size)
         assertEquals(
             weeklyBudget(trainingWeek, NutritionGoal.MAINTAIN, 0.0),
@@ -310,7 +310,7 @@ class NutritionTargetsTest {
 
     @Test
     fun `reconciliation keeps the shape of the week, hard days still eat more`() {
-        val targets = NutritionTargets.forWeek(week(trainingWeek), NutritionGoal.MAINTAIN, 0.0, mass, ffm)
+        val targets = NutritionTargets.forWeek(week(trainingWeek), NutritionGoal.MAINTAIN, 0.0)
         val restDay = targets[0]
         val bigDay = targets[5]
         assertTrue("rest ${restDay.kcal} vs big ${bigDay.kcal}", bigDay.kcal > restDay.kcal)
@@ -318,7 +318,7 @@ class NutritionTargetsTest {
 
     @Test
     fun `a deficit week sums below maintenance by the requested amount`() {
-        val targets = NutritionTargets.forWeek(week(trainingWeek), NutritionGoal.LOSE_FAT, -0.5, mass, ffm)
+        val targets = NutritionTargets.forWeek(week(trainingWeek), NutritionGoal.LOSE_FAT, -0.5)
         val maintenance = weeklyBudget(trainingWeek, NutritionGoal.MAINTAIN, 0.0)
         val expected = weeklyBudget(trainingWeek, NutritionGoal.LOSE_FAT, -0.5)
         val actual = targets.sumOf { it.kcal }
@@ -328,6 +328,6 @@ class NutritionTargetsTest {
 
     @Test
     fun `an empty week produces no targets rather than throwing`() {
-        assertTrue(NutritionTargets.forWeek(emptyList(), NutritionGoal.MAINTAIN, 0.0, mass, ffm).isEmpty())
+        assertTrue(NutritionTargets.forWeek(emptyList(), NutritionGoal.MAINTAIN, 0.0).isEmpty())
     }
 }

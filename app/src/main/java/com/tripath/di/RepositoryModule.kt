@@ -1,5 +1,7 @@
 package com.tripath.di
 
+import com.tripath.data.local.repository.FoodLookupRepository
+import com.tripath.data.local.repository.FoodLookupRepositoryImpl
 import com.tripath.data.local.repository.RecoveryRepository
 import com.tripath.data.local.repository.RecoveryRepositoryImpl
 import com.tripath.data.local.repository.TrainingRepository
@@ -29,5 +31,11 @@ abstract class RepositoryModule {
     abstract fun bindRecoveryRepository(
         recoveryRepositoryImpl: RecoveryRepositoryImpl
     ): RecoveryRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindFoodLookupRepository(
+        foodLookupRepositoryImpl: FoodLookupRepositoryImpl
+    ): FoodLookupRepository
 }
 

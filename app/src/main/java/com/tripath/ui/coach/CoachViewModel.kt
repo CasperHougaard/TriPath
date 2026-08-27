@@ -1,5 +1,6 @@
 package com.tripath.ui.coach
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.tripath.data.local.database.entities.DailyWellnessLog
@@ -21,7 +22,11 @@ import com.tripath.domain.TrainingPhase
 import com.tripath.domain.toCoachPhase
 import com.tripath.domain.coach.AutoPlannerGenerator
 import com.tripath.domain.coach.CoachWarning
+import com.tripath.domain.coach.PlannedStrainAdvisor
 import com.tripath.domain.coach.ReadinessStatus
+import com.tripath.domain.health.EnergyAvailabilityBand
+import com.tripath.domain.strain.ReadinessAssessment
+import com.tripath.domain.strain.ReadinessService
 import com.tripath.domain.coach.TrainingRulesEngine
 import com.tripath.domain.running.RunningGoal
 import com.tripath.ui.model.FormStatus
@@ -79,7 +84,8 @@ class CoachViewModel @Inject constructor(
     private val repository: TrainingRepository,
     private val trainingRulesEngine: TrainingRulesEngine,
     private val preferencesManager: PreferencesManager,
-    private val autoPlannerGenerator: AutoPlannerGenerator
+    private val autoPlannerGenerator: AutoPlannerGenerator,
+    private val readinessService: ReadinessService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CoachUiState())
@@ -88,6 +94,14 @@ class CoachViewModel @Inject constructor(
     // Readiness and alerts state flows
     private val _readinessState = MutableStateFlow<ReadinessStatus?>(null)
     val readinessState: StateFlow<ReadinessStatus?> = _readinessState.asStateFlow()
+
+    /**
+     * The per-channel readiness assessment — score, ranked drivers, and which disciplines are a good
+     * idea today. This is the model TriPath now owns and hands to LiftPath; [readinessState] is the
+     * older single-number view kept until the Coach card is rebuilt around this.
+     */
+    private val _assessmentState = MutableStateFlow<ReadinessAssessment?>(null)
+    val assessmentState: StateFlow<ReadinessAssessment?> = _assessmentState.asStateFlow()
     
     private val _alertsState = MutableStateFlow<List<CoachWarning>>(emptyList())
     val alertsState: StateFlow<List<CoachWarning>> = _alertsState.asStateFlow()
@@ -256,6 +270,14 @@ class CoachViewModel @Inject constructor(
                     )
                     _readinessState.value = readiness
 
+                    // The full per-channel assessment, which is what the planner rules and LiftPath
+                    // both read. Kept alongside the legacy score rather than replacing it inline so
+                    // the Coach card can adopt it independently of this load path.
+                    val assessment = runCatching { readinessService.currentReadiness(today) }
+                        .onFailure { Log.w("CoachViewModel", "Readiness assessment unavailable", it) }
+                        .getOrNull()
+                    _assessmentState.value = assessment
+
                     val currentPhase = CoachEngine.calculatePhase(today, data.profile.goalDate)
                     val coachPhase = currentPhase.toCoachPhase()
                     val yesterday = workoutLogs.filter { it.date == today.minusDays(1) }.firstOrNull()
@@ -275,11 +297,27 @@ class CoachViewModel @Inject constructor(
                         todayWellness = defaultWellness,
                         lastStrengthDate = lastStrengthDate,
                         currentPhase = coachPhase,
-                        recentRuns = recentRuns
+                        recentRuns = recentRuns,
+                        readiness = assessment,
+                        // Carried on the assessment rather than rebuilt here: the fuel model has
+                        // already run once inside the readiness service and running it twice is how
+                        // two parts of the same screen end up quoting different numbers.
+                        energyAvailability = assessment?.energyAvailability
+                            ?: EnergyAvailabilityBand.UNKNOWN
                     )
-                    _alertsState.value = warnings
+
+                    // Where the coming week stacks two sessions on the same tissue. Advisory, and
+                    // about the *schedule* rather than about today — which is why it is appended
+                    // here rather than folded into the day's rules.
+                    val planWarnings = runCatching { readinessService.planConflicts(today) }
+                        .onFailure { Log.w("CoachViewModel", "Plan conflict check unavailable", it) }
+                        .getOrDefault(emptyList())
+                        .let { PlannedStrainAdvisor.asWarnings(it) }
+
+                    _alertsState.value = warnings + planWarnings
                 } else {
                     _readinessState.value = null
+                    _assessmentState.value = null
                     _alertsState.value = emptyList()
                 }
             }

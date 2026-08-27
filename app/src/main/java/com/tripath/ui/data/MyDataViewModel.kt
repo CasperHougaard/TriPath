@@ -14,7 +14,9 @@ import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
+import com.tripath.data.local.database.dao.NutritionPresetDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
+import com.tripath.data.local.database.dao.ScannedFoodDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
@@ -26,7 +28,9 @@ import com.tripath.data.local.database.entities.DayNote
 import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.NutritionPreset
 import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.ScannedFoodCache
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
@@ -82,7 +86,9 @@ class MyDataViewModel @Inject constructor(
     private val wellnessDao: WellnessDao,
     private val bodyCompositionDao: BodyCompositionDao,
     private val nutritionLogDao: NutritionLogDao,
-    private val nutritionEntryDao: NutritionEntryDao
+    private val nutritionEntryDao: NutritionEntryDao,
+    private val nutritionPresetDao: NutritionPresetDao,
+    private val scannedFoodDao: ScannedFoodDao
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(MyDataUiState())
@@ -118,6 +124,8 @@ class MyDataViewModel @Inject constructor(
         DataCategory.BODY_COMPOSITION to bodyCompositionDao.getCount(),
         DataCategory.NUTRITION to nutritionLogDao.getCount(),
         DataCategory.NUTRITION_ENTRIES to nutritionEntryDao.getCount(),
+        DataCategory.NUTRITION_PRESETS to nutritionPresetDao.getCount(),
+        DataCategory.SCANNED_FOODS to scannedFoodDao.getCount(),
         DataCategory.WELLNESS_LOGS to wellnessDao.getLogCount(),
         DataCategory.WELLNESS_TASKS to wellnessDao.getTaskCount(),
         DataCategory.SPECIAL_PERIODS to specialPeriodDao.getCount(),
@@ -217,6 +225,8 @@ class MyDataViewModel @Inject constructor(
             DataCategory.BODY_COMPOSITION -> bodyCompositionDao.getAllOnce().map { it.toRecordUi() }
             DataCategory.NUTRITION -> nutritionLogDao.getAllOnce().map { it.toRecordUi() }
             DataCategory.NUTRITION_ENTRIES -> nutritionEntryDao.getAllOnce().map { it.toRecordUi() }
+            DataCategory.NUTRITION_PRESETS -> nutritionPresetDao.getAllOnce().map { it.toRecordUi() }
+            DataCategory.SCANNED_FOODS -> scannedFoodDao.getAllOnce().map { it.toRecordUi() }
             DataCategory.WELLNESS_LOGS -> wellnessDao.getAllLogsOnce().map { it.toRecordUi() }
             DataCategory.WELLNESS_TASKS -> wellnessDao.getAllTasksOnce().map { it.toRecordUi() }
             DataCategory.SPECIAL_PERIODS -> specialPeriodDao.getAllOnce().map { it.toRecordUi() }
@@ -400,6 +410,40 @@ private fun NutritionEntry.toRecordUi() = DataRecordUi(
         prevProteinG?.let { "Protein before" to "%.1f g".format(it) },
         creatineFrom?.let { from -> "Creatine" to "$from → $creatineTo" },
         "Logged" to formatEpochMillis(loggedAt)
+    )
+)
+
+private fun NutritionPreset.toRecordUi() = DataRecordUi(
+    id = id,
+    title = label,
+    subtitle = listOfNotNull(
+        kcal?.let { "%.0f kcal".format(it) },
+        proteinG?.let { "%.0f g protein".format(it) }
+    ).joinToString(" · ").ifBlank { "No macros set" },
+    fields = listOfNotNull(
+        kcal?.let { "Energy" to "%.0f kcal".format(it) },
+        proteinG?.let { "Protein" to "%.1f g".format(it) },
+        carbsG?.let { "Carbs" to "%.1f g".format(it) },
+        fatG?.let { "Fat" to "%.1f g".format(it) },
+        "Created" to formatEpochMillis(createdAt)
+    )
+)
+
+private fun ScannedFoodCache.toRecordUi() = DataRecordUi(
+    id = barcode,
+    title = name ?: barcode,
+    subtitle = listOfNotNull(
+        kcalPer100g?.let { "%.0f kcal / 100 g".format(it) },
+        proteinPer100g?.let { "%.1f g protein / 100 g".format(it) }
+    ).joinToString(" · ").ifBlank { "No nutrition recorded" },
+    fields = listOfNotNull(
+        "Barcode" to barcode,
+        kcalPer100g?.let { "Energy per 100 g" to "%.0f kcal".format(it) },
+        proteinPer100g?.let { "Protein per 100 g" to "%.1f g".format(it) },
+        // Worth surfacing: a corrected row is never overwritten by a later lookup, so this explains
+        // why a product that Open Food Facts has since fixed still shows the athlete's own figures.
+        "Source" to if (isManualOverride) "Your correction" else "Open Food Facts",
+        "Updated" to formatEpochMillis(updatedAt)
     )
 )
 

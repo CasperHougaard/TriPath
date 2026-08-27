@@ -3,7 +3,39 @@
     "allow": [
       "Bash(python -c ' *)",
       "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.health.NutritionTargetsTest\")",
-      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.health.*\")"
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.health.*\")",
+      "Bash(cd c:/Projects/fitness && echo \"=== share pkg? ===\" && ls app/src/main/java/com/liftpath/share 2>&1 | head && echo \"=== provider in manifest? ===\" && grep -n \"provider\" app/src/main/AndroidManifest.xml && echo \"=== Fuel still there? ===\" && ls app/src/main/java/com/liftpath/fragments/ProgressFuelFragment.kt 2>&1)",
+      "Read(//c/Projects/fitness/**)",
+      "Bash(git log *)",
+      "Bash(cd c:/Projects/fitness && grep -n \"JsonHelper\" app/src/main/java/com/liftpath/LiftPathApplication.kt | head && echo \"=== applicationId ===\" && grep -n \"applicationId\\\\|namespace\" app/build.gradle.kts 2>/dev/null || grep -n \"applicationId\\\\|namespace\" app/build.gradle)",
+      "Bash(cd c:/Projects/fitness && ls app/src/main/java/com/liftpath/*.kt && grep -rn \"JsonHelper\\(\" app/src/main/java/com/liftpath/fragments/WorkoutFragment.kt | head -3)",
+      "Bash(cd c:/Projects/fitness && sed -n '60,100p' app/src/main/AndroidManifest.xml)",
+      "Read(//c/Projects/fitness/app/src/main/**)",
+      "Bash(python3 -)",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.data.local.liftpath.*\")",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.liftpath.share.*\")",
+      "Bash(./gradlew.bat :app:compileDebugKotlin --console=plain -q)",
+      "Bash(cd c:/Projects/fitness && grep -n \"buildConfig\\\\|buildFeatures\" -A4 app/build.gradle.kts | head -20 && echo \"=== how does existing code get version? ===\" && grep -rn \"BuildConfig\\\\|versionName\\\\|packageManager.getPackageInfo\\(packageName\" app/src/main/java/com/liftpath --include=*.kt | head -8)",
+      "Bash(./gradlew :app:testDebugUnitTest :app:assembleDebug)",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.strain.*\")",
+      "Bash(./gradlew :app:compileDebugKotlin --console=plain)",
+      "Bash(./gradlew :app:dependencies --configuration debugCompileClasspath --console=plain)",
+      "Bash(git status *)",
+      "Bash(./gradlew compileDebugKotlin compileDebugUnitTestKotlin -q)",
+      "Bash(./gradlew testDebugUnitTest --tests \"*BackupRoundTripTest*\" -q)",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.strain.StrainTimelineTest\")",
+      "Bash(cd c:/Projects/fitness && grep -n \"tripath_card_title\" app/src/main/res/values/strings.xml)",
+      "Bash(rm -f app/src/main/java/com/liftpath/fragments/ProgressFuelFragment.kt app/src/main/res/layout/fragment_progress_fuel.xml app/src/main/java/com/liftpath/helpers/LiftingBurnEstimator.kt app/src/test/java/com/liftpath/helpers/LiftingBurnEstimatorTest.kt)",
+      "Bash(python3 -c ' *)",
+      "Bash(./gradlew :app:testDebugUnitTest --tests \"com.tripath.domain.coach.*\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Projects\\fitness\\app\\src\\main\\java\\com\\liftpath\\share",
+      "c:\\Projects\\fitness\\app\\src\\main",
+      "c:\\Projects\\fitness\\app\\src\\test\\java\\com\\liftpath\\share",
+      "c:\\Projects\\fitness",
+      "c:\\Projects\\fitness\\app\\src\\main\\res\\layout",
+      "c:\\Projects\\fitness\\app\\src\\test\\java\\com\\liftpath\\helpers"
     ]
   }
 }

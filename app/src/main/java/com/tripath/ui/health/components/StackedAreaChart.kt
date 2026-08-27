@@ -41,12 +41,18 @@ private val dateFormatter = DateTimeFormatter.ofPattern("d MMM")
  * fat + lean + bone add up to (roughly) total weight.
  *
  * Only timestamps present across all series are stacked, so every layer aligns cleanly.
+ *
+ * [smooth] fits a Catmull-Rom curve through the points, which suits a slowly-moving measured
+ * quantity like body mass. Turn it off for a series of discrete daily events — a spline through
+ * 0 → 180 → 0 overshoots below the axis and draws phantom load on a rest day, so daily training
+ * load wants straight segments even though they are jagged.
  */
 @Composable
 fun StackedAreaChart(
     series: List<StackSeries>,
     modifier: Modifier = Modifier,
-    height: androidx.compose.ui.unit.Dp = 200.dp
+    height: androidx.compose.ui.unit.Dp = 200.dp,
+    smooth: Boolean = true
 ) {
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
     val gridColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
@@ -104,13 +110,18 @@ fun StackedAreaChart(
             val upperPoints = commonTs.mapIndexed { i, ts -> Offset(xOf(ts), yOf(upper[i])) }
             val lowerPoints = commonTs.mapIndexed { i, ts -> Offset(xOf(ts), yOf(lower[i])) }
 
+            fun Path.edgeThrough(points: List<Offset>) {
+                if (smooth) curveThrough(points)
+                else points.drop(1).forEach { lineTo(it.x, it.y) }
+            }
+
             val area = Path().apply {
                 // Up the top edge...
                 moveTo(upperPoints.first().x, upperPoints.first().y)
-                curveThrough(upperPoints)
+                edgeThrough(upperPoints)
                 // ...back along the lower edge.
                 lineTo(lowerPoints.last().x, lowerPoints.last().y)
-                curveThrough(lowerPoints.reversed())
+                edgeThrough(lowerPoints.reversed())
                 close()
             }
             drawPath(area, color = s.color.copy(alpha = 0.55f))
@@ -118,7 +129,7 @@ fun StackedAreaChart(
             // Crisp top border for the layer.
             val border = Path().apply {
                 moveTo(upperPoints.first().x, upperPoints.first().y)
-                curveThrough(upperPoints)
+                edgeThrough(upperPoints)
             }
             drawPath(
                 border,

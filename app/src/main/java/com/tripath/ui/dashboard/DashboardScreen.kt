@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Pool
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.Timer
@@ -86,8 +87,10 @@ import com.tripath.data.model.Intensity
 import com.tripath.data.model.StrengthFocus
 import com.tripath.data.model.WorkoutType
 import com.tripath.domain.running.RunPlanDisplayMetrics
+import com.tripath.ui.dashboard.components.DashboardStatusTile
 import com.tripath.ui.dashboard.components.WeeklyActivityMatrix
 import com.tripath.ui.dashboard.components.WeeklyCalendarStrip
+import com.tripath.ui.health.components.SummaryTile
 import com.tripath.ui.model.FormStatus
 import com.tripath.ui.navigation.Screen
 import com.tripath.ui.theme.Spacing
@@ -146,7 +149,7 @@ fun DashboardScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(Spacing.lg)
         ) {
-            // 1. Header & Status (Combined) - Index 0
+            // 1. Header & Status (Training load + Readiness + Freshness, combined) - Index 0
             StaggeredAnimatedItem(index = 0) {
                 Column(
                     modifier = Modifier.padding(horizontal = Spacing.lg, vertical = Spacing.md),
@@ -157,12 +160,18 @@ fun DashboardScreen(
                         syncStatus = uiState.syncStatus,
                         onSyncClick = { viewModel.syncData() }
                     )
-                    
-                    TrainingStatusCard(
+
+                    DashboardStatusTile(
                         formStatus = uiState.formStatus,
                         tsb = uiState.tsb,
                         ctl = uiState.ctl,
-                        atl = uiState.atl
+                        atl = uiState.atl,
+                        assessment = uiState.readinessAssessment,
+                        history = uiState.readinessHistory,
+                        mostLoadedTrend = uiState.mostLoadedTrend,
+                        // Straight to the screen that explains these numbers, rather than to the
+                        // Coach tab where the same card has to be found and tapped a second time.
+                        onClick = { navController.navigate(Screen.ReadinessDetail.route) }
                     )
                 }
             }
@@ -248,6 +257,38 @@ fun DashboardScreen(
                 }
             }
 
+            // 4. Quick nutrition link - Index 3
+            StaggeredAnimatedItem(index = 3) {
+                Column(modifier = Modifier.padding(horizontal = Spacing.lg)) {
+                    val nutrition = uiState.todayNutrition
+                    // The day's requirement rides along on the readiness assessment, which has
+                    // already run the fuel model — so the tile can answer "on track for today's
+                    // training?" rather than only "how much have I eaten?".
+                    val target = uiState.readinessAssessment?.fuelTarget
+                    SummaryTile(
+                        title = "Today's Nutrition",
+                        value = nutrition?.energyKcal?.let { eaten ->
+                            target?.let { "%,.0f / %,.0f kcal".format(eaten, it.kcal) }
+                                ?: "%,.0f kcal".format(eaten)
+                        },
+                        subtitle = nutrition?.let { log ->
+                            listOfNotNull(
+                                log.proteinG?.let { protein ->
+                                    target?.let { "P %.0f/%.0fg".format(protein, it.proteinG) }
+                                        ?: "P %.0fg".format(protein)
+                                },
+                                target?.dayKind?.label,
+                                if (log.creatineTaken) "Creatine ✓" else null
+                            ).joinToString(" · ").ifEmpty { null }
+                        },
+                        icon = Icons.Default.Restaurant,
+                        accent = Color(0xFF26A69A),
+                        onClick = { navController.navigate(Screen.NutritionDetail.route) },
+                        emptyMessage = "Tap to log calories, protein & creatine"
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(Spacing.xl))
         }
     }
@@ -281,115 +322,6 @@ private fun DashboardHeader(
             )
         }
         SyncButton(syncStatus, onSyncClick)
-    }
-}
-
-@Composable
-private fun TrainingStatusCard(
-    formStatus: FormStatus,
-    tsb: Double,
-    ctl: Double,
-    atl: Double
-) {
-    val statusColor = when (formStatus) {
-        FormStatus.FRESHNESS -> Color(0xFF4CAF50)
-        FormStatus.OPTIMAL -> MaterialTheme.colorScheme.primary
-        FormStatus.OVERREACHING -> Color(0xFFFF5252)
-    }
-    
-    val statusText = when (formStatus) {
-        FormStatus.FRESHNESS -> "Fresh"
-        FormStatus.OPTIMAL -> "Optimal"
-        FormStatus.OVERREACHING -> "Tired"
-    }
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(Spacing.lg),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Main Status (Left)
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(Spacing.xs)
-            ) {
-                Text(
-                    text = "TRAINING STATUS",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    letterSpacing = 1.sp
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Bolt,
-                        contentDescription = null,
-                        tint = statusColor,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = statusText,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = statusColor
-                    )
-                }
-                Text(
-                    text = "Form (TSB): ${String.format("%+.0f", tsb)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-            }
-            
-            // Metrics Divider
-            Box(
-                modifier = Modifier
-                    .height(40.dp)
-                    .width(1.dp)
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
-            )
-
-            // Secondary Metrics (Right)
-            Column(
-                modifier = Modifier
-                    .weight(0.8f)
-                    .padding(start = Spacing.lg),
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm)
-            ) {
-                MetricRow(label = "Fitness", value = String.format("%.0f", ctl), color = MaterialTheme.colorScheme.primary)
-                MetricRow(label = "Fatigue", value = String.format("%.0f", atl), color = MaterialTheme.colorScheme.secondary)
-            }
-        }
-    }
-}
-
-@Composable
-private fun MetricRow(label: String, value: String, color: Color) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Bold,
-            color = color
-        )
     }
 }
 

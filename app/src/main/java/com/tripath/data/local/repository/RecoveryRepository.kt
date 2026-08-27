@@ -5,6 +5,7 @@ import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.NutritionPreset
 import com.tripath.data.local.database.entities.SleepLog
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
@@ -82,6 +83,25 @@ interface RecoveryRepository {
 
     /** Remove all logged data for [date]. */
     suspend fun clearNutritionDay(date: LocalDate)
+
+    // ---- Nutrition presets (the "library") ----
+
+    /** Saved label+macro combinations, alphabetical by label. */
+    fun getNutritionPresets(): Flow<List<NutritionPreset>>
+
+    /**
+     * Save a preset, replacing any existing one with the same label (ignoring case) rather than
+     * adding a duplicate. Does not affect any day's totals.
+     */
+    suspend fun saveNutritionPreset(
+        label: String,
+        kcal: Double?,
+        protein: Double?,
+        carbs: Double? = null,
+        fat: Double? = null
+    )
+
+    suspend fun deleteNutritionPreset(preset: NutritionPreset)
 }
 
 /** Which nutrition field a quick-add targets. */

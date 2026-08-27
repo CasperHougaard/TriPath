@@ -13,11 +13,30 @@ import org.junit.Test
  */
 class LiftPathShareContractTest {
 
+    private companion object {
+        /**
+         * Hash of the current column signatures, pinned identically in LiftPath's own
+         * `LiftPathShareContractTest`. **Do not "fix" this to make a build pass** — a mismatch means
+         * the contract changed on one side, and the other app's copy has to change with it.
+         */
+        const val EXPECTED_SCHEMA_HASH = "-5313bb2c"
+    }
+
     @Test
     fun `schema hash is stable across repeated calls`() {
         val first = LiftPathShareContract.schemaHash()
         val second = LiftPathShareContract.schemaHash()
         assertEquals(first, second)
+    }
+
+    /**
+     * The one assertion that makes two verbatim-duplicated files actually stay in step: both apps
+     * pin the same literal, so a one-sided column edit turns that side's build red rather than
+     * leaving two APKs that disagree at runtime about what a column means.
+     */
+    @Test
+    fun `schema hash matches the value LiftPath's copy of this contract pins`() {
+        assertEquals(EXPECTED_SCHEMA_HASH, LiftPathShareContract.schemaHash())
     }
 
     @Test

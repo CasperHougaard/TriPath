@@ -19,6 +19,7 @@ import com.tripath.ui.health.HealthScreen
 import com.tripath.ui.health.ManageHealthDataScreen
 import com.tripath.ui.health.bodyscan.BodyScanDetailScreen
 import com.tripath.ui.health.nutrition.NutritionDetailScreen
+import com.tripath.ui.health.nutrition.barcode.BarcodeScanScreen
 import com.tripath.ui.health.sleep.SleepDetailScreen
 import com.tripath.ui.planner.WeeklyPlannerScreen
 import com.tripath.ui.progress.ProgressScreen
@@ -32,11 +33,13 @@ sealed class Screen(val route: String) {
     object WeeklyPlanner : Screen("planner")
     object Stats : Screen("stats")
     object Coach : Screen("coach")
+    object ReadinessDetail : Screen("readiness_detail")
     object Health : Screen("health")
     object ManageHealthData : Screen("health_manage_data")
     object BodyScanDetail : Screen("body_scan_detail")
     object SleepDetail : Screen("sleep_detail")
     object NutritionDetail : Screen("nutrition_detail")
+    object NutritionBarcodeScan : Screen("nutrition_barcode_scan")
     object Settings : Screen("settings")
     object SyncedExercises : Screen("synced_exercises")
     object ExerciseImportDetail : Screen("exercise_import_detail/{sessionId}") {
@@ -91,6 +94,11 @@ fun TriPathNavigation(
         composable(Screen.Coach.route) {
             CoachScreen(navController = navController)
         }
+        composable(Screen.ReadinessDetail.route) {
+            com.tripath.ui.coach.detail.ReadinessDetailScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
         composable(Screen.AutoPlannerSettings.route) {
             AutoPlannerSettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
@@ -117,7 +125,13 @@ fun TriPathNavigation(
             SleepDetailScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.NutritionDetail.route) {
-            NutritionDetailScreen(onNavigateBack = { navController.popBackStack() })
+            NutritionDetailScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onScanBarcode = { navController.navigate(Screen.NutritionBarcodeScan.route) }
+            )
+        }
+        composable(Screen.NutritionBarcodeScan.route) {
+            BarcodeScanScreen(onNavigateBack = { navController.popBackStack() })
         }
         composable(Screen.LegacyPlanningSettings.route) {
             AutoPlannerSettingsScreen(

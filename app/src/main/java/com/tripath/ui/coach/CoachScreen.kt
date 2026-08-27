@@ -54,11 +54,13 @@ import com.tripath.ui.coach.components.CoachAssessmentCard
 import com.tripath.ui.coach.components.CoachAlertsList
 import com.tripath.ui.coach.components.PhaseTimeline
 import com.tripath.ui.coach.components.ReadinessBreakdownDialog
+import com.tripath.ui.coach.components.ReadinessAssessmentCard
 import com.tripath.ui.coach.components.ReadinessCard
 import com.tripath.ui.coach.components.SpecialPeriodDialog
 import com.tripath.ui.coach.components.SpecialPeriodList
 import com.tripath.ui.components.SectionHeader
 import com.tripath.ui.components.charts.LineChart
+import com.tripath.ui.navigation.Screen
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
 import java.time.DayOfWeek
@@ -73,6 +75,7 @@ fun CoachScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val readinessState by viewModel.readinessState.collectAsStateWithLifecycle()
+    val assessmentState by viewModel.assessmentState.collectAsStateWithLifecycle()
     val alertsState by viewModel.alertsState.collectAsStateWithLifecycle()
     val isSmartPlanningEnabled by viewModel.isSmartPlanningEnabled.collectAsStateWithLifecycle()
     
@@ -118,11 +121,22 @@ fun CoachScreen(
 
                     // Readiness Card and Alerts (if smart planning enabled)
                     if (isSmartPlanningEnabled) {
-                        ReadinessCard(
-                            readinessStatus = readinessState,
-                            onClick = { showReadinessBreakdown = true },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        // The per-channel assessment when there is enough history for it, otherwise
+                        // the older single-score card. Both are never shown at once — two readiness
+                        // numbers on one screen is exactly the confusion this model exists to end.
+                        if (assessmentState?.strain?.hasData == true) {
+                            ReadinessAssessmentCard(
+                                assessment = assessmentState,
+                                onClick = { navController?.navigate(Screen.ReadinessDetail.route) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            ReadinessCard(
+                                readinessStatus = readinessState,
+                                onClick = { showReadinessBreakdown = true },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                         
                         if (alertsState.isNotEmpty()) {
                             SectionHeader(

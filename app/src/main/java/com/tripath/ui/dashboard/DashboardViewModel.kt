@@ -2,13 +2,17 @@ package com.tripath.ui.dashboard
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.healthconnect.HealthConnectManager
 import com.tripath.data.local.preferences.PreferencesManager
+import com.tripath.data.local.repository.RecoveryRepository
 import com.tripath.data.local.repository.TrainingRepository
 import com.tripath.data.model.WorkoutType
 import com.tripath.domain.TrainingMetricsCalculator
+import com.tripath.domain.strain.ReadinessAssessment
+import com.tripath.domain.strain.ReadinessService
 import com.tripath.ui.model.FormStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -18,7 +22,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -95,8 +101,16 @@ data class DashboardUiState(
     val tsb: Double = 0.0,  // Training Stress Balance (Form)
     val formStatus: FormStatus = FormStatus.OPTIMAL,
     val weeklyAllowedTSS: Int = 0,
-    val thresholdRunPace: Int? = null
+    val thresholdRunPace: Int? = null,
+    val readinessAssessment: ReadinessAssessment? = null,
+    val readinessHistory: List<Pair<LocalDate, Int>> = emptyList(),
+    /** Freshness trend for the channel [readinessAssessment] reports as most loaded. */
+    val mostLoadedTrend: List<Pair<LocalDate, Int>> = emptyList(),
+    val todayNutrition: NutritionLog? = null
 )
+
+/** Matches the readiness sparkline's window, so the two lines in the tile cover the same days. */
+private const val STRAIN_SPARKLINE_DAYS = 14L
 
 private val dashboardWorkoutOrder = listOf(
     WorkoutType.STRENGTH,
@@ -113,7 +127,9 @@ private val dashboardWorkoutOrder = listOf(
 class DashboardViewModel @Inject constructor(
     private val repository: TrainingRepository,
     private val healthConnectManager: HealthConnectManager,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val readinessService: ReadinessService,
+    private val recoveryRepository: RecoveryRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DashboardUiState())
@@ -126,6 +142,8 @@ class DashboardViewModel @Inject constructor(
         loadDashboardData()
         loadPerformanceMetrics()
         loadThresholdRunPace()
+        loadReadinessSummary()
+        loadTodayNutrition()
         updateGreeting()
     }
 
@@ -188,6 +206,97 @@ class DashboardViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 // Silently handle errors - performance metrics are non-critical
+            }
+        }
+    }
+
+    /**
+     * Load the condensed readiness assessment and its 14-day trend, gated the same way the Coach
+     * screen gates its own readiness card: only when Smart Planning is on and a profile exists,
+     * since [readinessService] leans on profile-derived baselines (sleep need, etc).
+     */
+    private fun loadReadinessSummary() {
+        viewModelScope.launch {
+            combine(
+                repository.getAllWorkoutLogs(),
+                preferencesManager.autoPlannerEnabledFlow,
+                repository.getUserProfile()
+            ) { workouts, smartEnabled, profile ->
+                // A fingerprint rather than the logs themselves. What follows reads about eight whole
+                // tables, recomputes 120 days of strain and fuel, fifteen readiness assessments and a
+                // 90-day trend — and the workout flow re-emits on *any* write to that table,
+                // including the many during a sync that change nothing readiness depends on.
+                ReadinessTrigger(
+                    canAssess = smartEnabled && profile != null,
+                    workoutCount = workouts.size,
+                    latestWorkout = workouts.maxOfOrNull { it.date },
+                    totalTss = workouts.sumOf { it.computedTSS ?: 0 }
+                )
+            }
+                .distinctUntilChanged()
+                // collectLatest, not collect: a sync emitting a dozen times in a second should run
+                // the model once, not queue a dozen full passes behind each other.
+                .collectLatest { trigger ->
+                    if (!trigger.canAssess) {
+                        _uiState.value = _uiState.value.copy(
+                            readinessAssessment = null,
+                            readinessHistory = emptyList(),
+                            mostLoadedTrend = emptyList()
+                        )
+                        return@collectLatest
+                    }
+                    val today = LocalDate.now()
+                    val assessment = runCatching { readinessService.currentReadiness(today) }.getOrNull()
+                    val history = runCatching { readinessService.readinessHistory(today = today) }
+                        .getOrDefault(emptyList())
+                    _uiState.value = _uiState.value.copy(
+                        readinessAssessment = assessment,
+                        readinessHistory = history,
+                        mostLoadedTrend = mostLoadedTrend(assessment, today)
+                    )
+                }
+        }
+    }
+
+    /**
+     * What has to change before readiness is worth recomputing.
+     *
+     * Deliberately coarse: it tracks the training history's shape rather than its contents, since
+     * that is what every figure on the readiness tiles is derived from.
+     */
+    private data class ReadinessTrigger(
+        val canAssess: Boolean,
+        val workoutCount: Int,
+        val latestWorkout: LocalDate?,
+        val totalTss: Int
+    )
+
+    /**
+     * Freshness over the sparkline window for whichever channel is in the deepest hole today.
+     *
+     * Which channel that is comes from [assessment], so the line always describes the channel the
+     * tile is naming — recomputing "most loaded" per day would draw a line that silently switched
+     * tissues halfway across and meant nothing at either end.
+     */
+    private suspend fun mostLoadedTrend(
+        assessment: ReadinessAssessment?,
+        today: LocalDate
+    ): List<Pair<LocalDate, Int>> {
+        val channel = assessment?.strain?.mostLoaded?.channel ?: return emptyList()
+        return runCatching {
+            readinessService.strainTrend(days = STRAIN_SPARKLINE_DAYS, today = today)
+                .freshnessSeries(channel)
+        }.getOrDefault(emptyList())
+    }
+
+    /** Today's logged nutrition, for the dashboard's quick-nutrition tile. */
+    private fun loadTodayNutrition() {
+        viewModelScope.launch {
+            recoveryRepository.getNutritionLogs().collect { logs ->
+                val today = LocalDate.now()
+                _uiState.value = _uiState.value.copy(
+                    todayNutrition = logs.firstOrNull { it.date == today }
+                )
             }
         }
     }

@@ -31,6 +31,10 @@ interface LiftPathDao {
     @Query("SELECT * FROM lift_exercise_catalog")
     suspend fun getAllExercisesOnce(): List<LiftExerciseCatalogEntry>
 
+    /** Every set across every session. The strain model joins these by session rather than one at a time. */
+    @Query("SELECT * FROM lift_set_logs")
+    suspend fun getAllSetsOnce(): List<LiftSetLog>
+
     @Query("SELECT COUNT(*) FROM lift_session_logs")
     suspend fun getSessionCount(): Int
 

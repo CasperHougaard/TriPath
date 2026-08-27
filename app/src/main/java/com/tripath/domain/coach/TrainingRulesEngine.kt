@@ -6,6 +6,8 @@ import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.model.AllergySeverity
 import com.tripath.data.model.WorkoutType
+import com.tripath.domain.health.EnergyAvailabilityBand
+import com.tripath.domain.strain.ReadinessAssessment
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -138,7 +140,13 @@ class TrainingRulesEngine @Inject constructor(
         todayWellness: DailyWellnessLog,
         lastStrengthDate: LocalDate?,
         currentPhase: TrainingPhase,
-        recentRuns: List<WorkoutLog>
+        recentRuns: List<WorkoutLog>,
+        /**
+         * Today's readiness, when it can be computed. Null falls back to the date-and-type
+         * heuristics below, so an install with no strain history behaves exactly as before.
+         */
+        readiness: ReadinessAssessment? = null,
+        energyAvailability: EnergyAvailabilityBand = EnergyAvailabilityBand.UNKNOWN
     ): List<CoachWarning> {
         // Step 1: Check if Smart Planning is enabled
         val smartEnabled = preferencesManager.autoPlannerEnabledFlow.first()
@@ -153,8 +161,26 @@ class TrainingRulesEngine @Inject constructor(
             return warnings
         }
 
-        // Rule 3: Heavy Legs Protocol
-        if (yesterday?.type == WorkoutType.STRENGTH && todayPlan.type != WorkoutType.SWIM) {
+        // Rule 3: is the tissue this session needs actually recovered?
+        //
+        // Supersedes the old "yesterday was strength, so go easy unless it's a swim" rule. That was
+        // the same instinct expressed with the only information available at the time — a proxy for
+        // tissue state. Now that per-channel strain exists, ask the real question, which both
+        // catches what the proxy missed (a long run three days ago) and stops firing where it was
+        // wrong (a heavy upper-body day has no bearing on a ride).
+        val hasChannelData = readiness?.strain?.hasData == true
+        if (hasChannelData) {
+            warnings += ReadinessPlanRules.evaluate(
+                plan = todayPlan.asPlanShape(),
+                plannedZone = inferZoneFromWorkoutLog(todayPlan),
+                readiness = readiness
+            )
+            warnings += ReadinessPlanRules.evaluateFuelling(
+                readiness = readiness,
+                energyAvailability = energyAvailability,
+                weeklyRampPct = readiness?.weeklyLoadRampPct
+            )
+        } else if (yesterday?.type == WorkoutType.STRENGTH && todayPlan.type != WorkoutType.SWIM) {
             val todayZone = inferZoneFromWorkoutLog(todayPlan)
             if (todayZone > 1) {
                 warnings.add(
@@ -185,6 +211,18 @@ class TrainingRulesEngine @Inject constructor(
 
         return warnings
     }
+
+    /**
+     * The readiness rules describe a *planned* session, but this entry point is handed a
+     * [WorkoutLog]. Only the type and load are read, so a minimal stand-in is enough and avoids
+     * duplicating the rules for two shapes of the same thing.
+     */
+    private fun WorkoutLog.asPlanShape(): TrainingPlan = TrainingPlan(
+        date = date,
+        type = type,
+        durationMinutes = durationMinutes,
+        plannedTSS = computedTSS ?: 0
+    )
 
     /**
      * Infer zone number from WorkoutLog data.

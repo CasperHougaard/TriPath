@@ -11,7 +11,9 @@ import com.tripath.data.local.database.entities.DayTemplate
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionEntryKind
 import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.NutritionPreset
 import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.ScannedFoodCache
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.SpecialPeriodType
@@ -61,10 +63,12 @@ data class AppBackupData(
     val bodyCompositionLogs: List<BodyCompositionLogDto> = emptyList(),
     val nutritionLogs: List<NutritionLogDto> = emptyList(),
     val nutritionEntries: List<NutritionEntryDto> = emptyList(),
+    val nutritionPresets: List<NutritionPresetDto> = emptyList(),
     val dailyActivityLogs: List<DailyActivityLogDto> = emptyList(),
     val liftSessionLogs: List<LiftSessionLogDto> = emptyList(),
     val liftSetLogs: List<LiftSetLogDto> = emptyList(),
     val liftExerciseCatalog: List<LiftExerciseCatalogEntryDto> = emptyList(),
+    val scannedFoods: List<ScannedFoodDto> = emptyList(),
     val preferences: List<PreferenceEntryDto> = emptyList(),
     /**
      * Profile fields as written by backup versions <= 4, when the profile lived in its own DTO
@@ -533,6 +537,39 @@ fun NutritionEntryDto.toEntity() = NutritionEntry(
     creatineTo = creatineTo
 )
 
+// ==================== Nutrition presets (the "library") ====================
+
+@Serializable
+data class NutritionPresetDto(
+    val id: String,
+    val label: String,
+    val kcal: Double? = null,
+    val proteinG: Double? = null,
+    val carbsG: Double? = null,
+    val fatG: Double? = null,
+    val createdAt: Long
+)
+
+fun NutritionPreset.toDto() = NutritionPresetDto(
+    id = id,
+    label = label,
+    kcal = kcal,
+    proteinG = proteinG,
+    carbsG = carbsG,
+    fatG = fatG,
+    createdAt = createdAt
+)
+
+fun NutritionPresetDto.toEntity() = NutritionPreset(
+    id = id,
+    label = label,
+    kcal = kcal,
+    proteinG = proteinG,
+    carbsG = carbsG,
+    fatG = fatG,
+    createdAt = createdAt
+)
+
 // ==================== Daily activity (whole-day steps, calories, HRV) ====================
 
 @Serializable
@@ -679,6 +716,36 @@ fun LiftExerciseCatalogEntryDto.toEntity() = LiftExerciseCatalogEntry(
     primaryTargets = primaryTargets,
     secondaryTargets = secondaryTargets,
     importedAt = importedAt
+)
+
+// ==================== Scanned food cache (barcode -> per-100g nutrition) ====================
+
+@Serializable
+data class ScannedFoodDto(
+    val barcode: String,
+    val name: String? = null,
+    val kcalPer100g: Double? = null,
+    val proteinPer100g: Double? = null,
+    val isManualOverride: Boolean = false,
+    val updatedAt: Long
+)
+
+fun ScannedFoodCache.toDto() = ScannedFoodDto(
+    barcode = barcode,
+    name = name,
+    kcalPer100g = kcalPer100g,
+    proteinPer100g = proteinPer100g,
+    isManualOverride = isManualOverride,
+    updatedAt = updatedAt
+)
+
+fun ScannedFoodDto.toEntity() = ScannedFoodCache(
+    barcode = barcode,
+    name = name,
+    kcalPer100g = kcalPer100g,
+    proteinPer100g = proteinPer100g,
+    isManualOverride = isManualOverride,
+    updatedAt = updatedAt
 )
 
 // ==================== Legacy user profile (backup version <= 4) ====================

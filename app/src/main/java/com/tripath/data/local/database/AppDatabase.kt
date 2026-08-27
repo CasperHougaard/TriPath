@@ -11,7 +11,9 @@ import com.tripath.data.local.database.dao.DayTemplateDao
 import com.tripath.data.local.database.dao.LiftPathDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
+import com.tripath.data.local.database.dao.NutritionPresetDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
+import com.tripath.data.local.database.dao.ScannedFoodDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
@@ -27,7 +29,9 @@ import com.tripath.data.local.database.entities.LiftSessionLog
 import com.tripath.data.local.database.entities.LiftSetLog
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.NutritionPreset
 import com.tripath.data.local.database.entities.RawWorkoutData
+import com.tripath.data.local.database.entities.ScannedFoodCache
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.data.local.database.entities.SpecialPeriod
 import com.tripath.data.local.database.entities.TrainingPlan
@@ -60,12 +64,14 @@ import com.tripath.data.local.database.entities.WorkoutLog
         BodyCompositionLog::class,
         NutritionLog::class,
         NutritionEntry::class,
+        NutritionPreset::class,
         DailyActivityLog::class,
         LiftSessionLog::class,
         LiftSetLog::class,
-        LiftExerciseCatalogEntry::class
+        LiftExerciseCatalogEntry::class,
+        ScannedFoodCache::class
     ],
-    version = 22,
+    version = 24,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -82,8 +88,10 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun bodyCompositionDao(): BodyCompositionDao
     abstract fun nutritionLogDao(): NutritionLogDao
     abstract fun nutritionEntryDao(): NutritionEntryDao
+    abstract fun nutritionPresetDao(): NutritionPresetDao
     abstract fun dailyActivityDao(): DailyActivityDao
     abstract fun liftPathDao(): LiftPathDao
+    abstract fun scannedFoodDao(): ScannedFoodDao
 
     companion object {
         const val DATABASE_NAME = "tripath_database"

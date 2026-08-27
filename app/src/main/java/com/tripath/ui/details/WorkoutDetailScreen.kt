@@ -71,6 +71,7 @@ import com.tripath.domain.running.RunWorkoutStep
 import com.tripath.domain.running.StructuredRunWorkout
 import com.tripath.domain.running.StructuredRunWorkoutBuilder
 import com.tripath.domain.running.runningSessionTypeFromPlanSubType
+import com.tripath.domain.strain.SessionStrain
 import com.tripath.ui.components.IntensityTag
 import com.tripath.ui.components.RouteViewer
 import com.tripath.ui.components.charts.ZoneDistributionChart
@@ -158,6 +159,7 @@ fun WorkoutDetailScreen(
                             userProfile = uiState.userProfile,
                             route = uiState.route,
                             rawWorkoutData = uiState.rawWorkoutData,
+                            sessionStrain = uiState.sessionStrain,
                             viewModel = viewModel
                         )
                     }
@@ -334,6 +336,7 @@ private fun CompletedWorkoutContent(
     userProfile: UserProfile?,
     route: List<RoutePoint>?,
     rawWorkoutData: com.tripath.data.local.database.entities.RawWorkoutData?,
+    sessionStrain: SessionStrain?,
     viewModel: WorkoutDetailViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -387,6 +390,13 @@ private fun CompletedWorkoutContent(
                 plannedTSS = linkedPlan.plannedTSS,
                 actualTSS = log.computedTSS ?: 0
             )
+        }
+
+        // What this session cost per tissue, and how it decays away. Sits directly after the load
+        // figures because it is the same session read a different way: TSS is one number for the
+        // whole body, this is where that number landed.
+        if (sessionStrain != null && !sessionStrain.isEmpty) {
+            SessionStrainCard(strain = sessionStrain)
         }
 
         // Heart Rate Zone Distribution

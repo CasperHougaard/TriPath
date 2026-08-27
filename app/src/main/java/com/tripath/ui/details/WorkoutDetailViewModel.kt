@@ -11,6 +11,8 @@ import com.tripath.data.model.RoutePoint
 import com.tripath.domain.running.RunningGoal
 import com.tripath.domain.running.RunningGoalType
 import com.tripath.domain.running.runningSessionTypeFromPlanSubType
+import com.tripath.domain.strain.ReadinessService
+import com.tripath.domain.strain.SessionStrain
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +36,11 @@ data class WorkoutDetailUiState(
     val linkedPlan: TrainingPlan? = null, // For TSS comparison with completed logs
     val route: List<RoutePoint>? = null,
     val rawWorkoutData: com.tripath.data.local.database.entities.RawWorkoutData? = null,
+    /**
+     * Per-channel cost of this session, for completed logs only — a plan has no zone distribution
+     * or distance actually covered, so any figure for one would be the planner's guess restated.
+     */
+    val sessionStrain: SessionStrain? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
     val isPlanned: Boolean = false
@@ -46,7 +53,8 @@ data class WorkoutDetailUiState(
 @HiltViewModel
 class WorkoutDetailViewModel @Inject constructor(
     private val repository: TrainingRepository,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val readinessService: ReadinessService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WorkoutDetailUiState())
@@ -147,6 +155,10 @@ class WorkoutDetailViewModel @Inject constructor(
                             userProfile = profile,
                             route = route,
                             rawWorkoutData = rawData,
+                            // Non-fatal: the rest of the screen is worth showing even if the
+                            // LiftPath tables cannot be read.
+                            sessionStrain = runCatching { readinessService.sessionStrain(log) }
+                                .getOrNull(),
                             isLoading = false
                         )
                     } else {

@@ -9,18 +9,33 @@ import kotlin.math.roundToInt
  * How hard a day is, which sets the carbohydrate band. Named after what the athlete is doing rather
  * than after a TSS number, because the bands come from the training-hours literature.
  */
-enum class DayKind(val label: String, val carbGramsPerKg: ClosedFloatingPointRange<Double>) {
+enum class DayKind(
+    /** Standalone label, for a chip or a column heading. */
+    val label: String,
+    /**
+     * The same thing as it reads inside a sentence.
+     *
+     * Separate from [label] because "Big day" already contains the word: appending "day" to the
+     * label produced "a big day day" in every warning and rationale the UI now shows.
+     */
+    val phrase: String,
+    val carbGramsPerKg: ClosedFloatingPointRange<Double>
+) {
     /** Rest or light movement. */
-    REST("Rest / light", 3.0..5.0),
+    REST("Rest / light", "rest day", 3.0..5.0),
 
     /** Around an hour of moderate work. */
-    MODERATE("Moderate", 5.0..7.0),
+    MODERATE("Moderate", "moderate day", 5.0..7.0),
 
     /** One to three hours of endurance work. */
-    ENDURANCE("Endurance", 6.0..10.0),
+    ENDURANCE("Endurance", "endurance day", 6.0..10.0),
 
     /** Over three hours, or a race. */
-    EXTREME("Big day", 8.0..12.0)
+    EXTREME("Big day", "big day", 8.0..12.0);
+
+    /** [phrase] with the right indefinite article: "a rest day", but "an endurance day". */
+    val withArticle: String
+        get() = if (phrase.first().lowercaseChar() in "aeiou") "an $phrase" else "a $phrase"
 }
 
 /** Something the athlete should know about a target before following it. */
@@ -323,7 +338,7 @@ object NutritionTargets {
         if (carbs < kind.carbGramsPerKg.start * mass - 0.001) {
             warnings += TargetWarning(
                 TargetWarning.Code.CARBS_BELOW_BAND,
-                "Carbohydrate is below what a ${kind.label.lowercase()} day usually needs — the " +
+                "Carbohydrate is below what ${kind.withArticle} usually needs — the " +
                     "energy budget cannot cover both the session and the goal"
             )
         }
@@ -347,13 +362,16 @@ object NutritionTargets {
      * goal is, so a week of hard days would quietly overshoot and a week of rest days undershoot.
      * Scaling the surplus or shortfall back across the days keeps the rate the athlete asked for
      * while leaving the *shape* of the week intact.
+     *
+     * Body mass comes from each [DayTargetInput] rather than from one figure for the whole call, so
+     * a target computed for a past day reflects the weight the athlete was *then*. A single figure
+     * would let today's weigh-in retroactively rewrite what last month needed, which is fine for a
+     * headline number and wrong for a history chart.
      */
     fun forWeek(
         days: List<DayTargetInput>,
         goal: NutritionGoal,
-        ratePctPerWeek: Double,
-        bodyMassKg: Double?,
-        ffmKg: Double?
+        ratePctPerWeek: Double
     ): List<DailyNutritionTarget> {
         val raw = days.mapIndexedNotNull { i, input ->
             forDay(
@@ -361,8 +379,8 @@ object NutritionTargets {
                 nonTefExpenditureKcal = input.nonTefExpenditureKcal,
                 goal = goal,
                 ratePctPerWeek = ratePctPerWeek,
-                bodyMassKg = bodyMassKg,
-                ffmKg = ffmKg,
+                bodyMassKg = input.bodyMassKg,
+                ffmKg = input.ffmKg,
                 today = input.load,
                 previousDay = days.getOrNull(i - 1)?.load,
                 nextDay = days.getOrNull(i + 1)?.load
@@ -374,7 +392,7 @@ object NutritionTargets {
             val nonTef = input.nonTefExpenditureKcal ?: return@sumOf 0.0
             MetabolicModel.targetIntake(
                 nonTef,
-                dailyEnergyBalanceKcal(goal, ratePctPerWeek, bodyMassKg)
+                dailyEnergyBalanceKcal(goal, ratePctPerWeek, input.bodyMassKg)
             ) ?: 0.0
         }
         val planned = raw.sumOf { it.kcal }
@@ -382,28 +400,30 @@ object NutritionTargets {
 
         // Reconcile through carbohydrate only: protein is a floor and fat is at or above one, so
         // carbohydrate is the macro that is *meant* to flex with the work.
+        //
+        // Every day's carbohydrate is in the pool, including days already at their band floor. The
+        // alternative — refusing to take from those days — would quietly abandon the rate the
+        // athlete asked for, and [forDay] has already settled that argument the other way: go under
+        // the band and say so.
         val deltaKcal = budget - planned
-        val flexibleCarbG = raw.sumOf { target ->
-            // Days already at their band floor cannot give any more back.
-            target.carbsG
-        }
+        val flexibleCarbG = raw.sumOf { it.carbsG }
         if (flexibleCarbG <= 0.0) return raw
 
-        val bodyMass = bodyMassKg ?: return raw
+        val massByDate = days.associate { it.date to it.bodyMassKg }
         return raw.map { target ->
             val share = target.carbsG / flexibleCarbG
             val adjustG = deltaKcal * share / KCAL_PER_G_CARB
             val carbs = (target.carbsG + adjustG).coerceAtLeast(0.0)
             // Reconciling can push a day under its band even though the day alone was fine. Say so
             // rather than letting the week silently under-fuel its hardest sessions.
-            val bandFloor = target.dayKind.carbGramsPerKg.start * bodyMass
+            val bandFloor = target.dayKind.carbGramsPerKg.start * (massByDate[target.date] ?: 0.0)
             val warnings = if (
                 carbs < bandFloor &&
                 target.warnings.none { it.code == TargetWarning.Code.CARBS_BELOW_BAND }
             ) {
                 target.warnings + TargetWarning(
                     TargetWarning.Code.CARBS_BELOW_BAND,
-                    "This week's energy budget puts carbohydrate below what a ${target.dayKind.label} " +
+                    "This week's energy budget puts carbohydrate below what ${target.dayKind.withArticle} " +
                         "day normally needs — consider a smaller deficit or an easier week"
                 )
             } else {
@@ -419,11 +439,18 @@ object NutritionTargets {
         }
     }
 
-    /** One day's inputs to [forWeek]. */
+    /**
+     * One day's inputs to [forWeek].
+     *
+     * [bodyMassKg] and [ffmKg] are that day's forward-filled figures — see [forWeek] for why they
+     * are per-day rather than one value for the window.
+     */
     data class DayTargetInput(
         val date: LocalDate,
         val nonTefExpenditureKcal: Double?,
-        val load: DayLoad
+        val load: DayLoad,
+        val bodyMassKg: Double?,
+        val ffmKg: Double?
     )
 
     private fun rationale(
@@ -433,7 +460,7 @@ object NutritionTargets {
         nextDay: DayLoad?
     ): String {
         val parts = mutableListOf<String>()
-        parts += "${kind.label} day"
+        parts += kind.phrase.replaceFirstChar { it.uppercase() }
         when {
             balanceKcal < -50 -> parts += "${-balanceKcal.roundToInt()} kcal under expenditure"
             balanceKcal > 50 -> parts += "${balanceKcal.roundToInt()} kcal over expenditure"

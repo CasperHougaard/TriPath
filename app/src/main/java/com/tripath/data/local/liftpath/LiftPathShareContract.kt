@@ -41,10 +41,14 @@ object LiftPathShareContract {
     const val QUERY_FROM = "from"
     const val QUERY_TO = "to"
 
-    val URI_HANDSHAKE: Uri = Uri.parse("content://$AUTHORITY/$PATH_HANDSHAKE")
-    val URI_SESSIONS: Uri = Uri.parse("content://$AUTHORITY/$PATH_SESSIONS")
-    val URI_SETS: Uri = Uri.parse("content://$AUTHORITY/$PATH_SETS")
-    val URI_EXERCISES: Uri = Uri.parse("content://$AUTHORITY/$PATH_EXERCISES")
+    // Lazy on purpose. `Uri.parse` is an Android framework call, and the unmocked android.jar used
+    // by JVM unit tests throws from it — eagerly initialising these would make the whole object
+    // unloadable in a plain unit test, taking the schema-hash and capability checks down with it.
+    // Nothing on device notices: the URIs are built on first use instead of at class load.
+    val URI_HANDSHAKE: Uri by lazy { Uri.parse("content://$AUTHORITY/$PATH_HANDSHAKE") }
+    val URI_SESSIONS: Uri by lazy { Uri.parse("content://$AUTHORITY/$PATH_SESSIONS") }
+    val URI_SETS: Uri by lazy { Uri.parse("content://$AUTHORITY/$PATH_SETS") }
+    val URI_EXERCISES: Uri by lazy { Uri.parse("content://$AUTHORITY/$PATH_EXERCISES") }
 
     /**
      * Capability tokens this build of the contract can serve. Consumers negotiate on these, so an

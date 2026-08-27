@@ -56,7 +56,9 @@ class RunningGoalEditorStateTest {
         val state = RunningGoalEditorState.fromGoal(null)
 
         assertNull(state.toRunningGoalOrNull()?.targetDistanceMeters)
-        assertEquals(RunningGoalType.COMPLETE_DISTANCE, state.goalType)
+        // A blank editor opens on ENDURANCE — the default moved there in 0.9 and this assertion
+        // was left behind on the old COMPLETE_DISTANCE.
+        assertEquals(RunningGoalType.ENDURANCE, state.goalType)
         assertEquals("", state.targetDistanceKm)
     }
 }

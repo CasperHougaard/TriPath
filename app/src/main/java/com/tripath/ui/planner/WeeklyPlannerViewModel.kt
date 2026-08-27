@@ -10,11 +10,13 @@ import com.tripath.data.local.database.entities.TrainingPlan
 import com.tripath.data.local.database.entities.WorkoutLog
 import com.tripath.data.local.preferences.PreferencesManager
 import com.tripath.data.local.repository.TrainingRepository
+import com.tripath.domain.strain.ReadinessService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
@@ -50,13 +52,24 @@ data class WeeklyPlannerUiState(
     val includeImportedActivities: Boolean = false,
     val isMonthView: Boolean = false,
     val userProfile: UserProfile? = null,
-    val hasActiveRunningGoal: Boolean = false
+    val hasActiveRunningGoal: Boolean = false,
+    /**
+     * Projected readiness score per upcoming day, from planned training only.
+     *
+     * Kept beside the rows rather than inside [WeekDay] on purpose: it is loaded on its own schedule
+     * and arrives after the grid, so folding it into the rows would mean rebuilding all of them to
+     * deliver a number that decorates them.
+     */
+    val projectedReadiness: Map<LocalDate, Int> = emptyMap(),
+    /** Days where the plan asks a tissue for more than it will have recovered. Advisory. */
+    val planConflicts: Map<LocalDate, String> = emptyMap()
 )
 
 @HiltViewModel
 class WeeklyPlannerViewModel @Inject constructor(
     private val repository: TrainingRepository,
-    private val preferencesManager: PreferencesManager
+    private val preferencesManager: PreferencesManager,
+    private val readinessService: ReadinessService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(WeeklyPlannerUiState())
@@ -77,6 +90,42 @@ class WeeklyPlannerViewModel @Inject constructor(
         observeUserProfile()
         observeActiveRunningGoal()
         loadIncludeImportedPreference()
+        loadProjections()
+    }
+
+    /**
+     * Projected readiness and plan conflicts for the visible range.
+     *
+     * Reloaded when the visible window moves, and on plan changes so that dragging a session
+     * somewhere better is visibly better. `collectLatest` because scrolling through months would
+     * otherwise queue one full projection per week the user passes through.
+     */
+    private fun loadProjections() {
+        viewModelScope.launch {
+            combine(
+                _startDate,
+                _isMonthView,
+                repository.getAllTrainingPlans().map { plans -> plans.size to plans.sumOf { it.plannedTSS } }
+            ) { start, isMonthView, planFingerprint -> Triple(start, isMonthView, planFingerprint) }
+                .distinctUntilChanged()
+                .collectLatest { (start, isMonthView, _) ->
+                    val today = LocalDate.now()
+                    val end = start.plusWeeks(if (isMonthView) 6 else 4).minusDays(1)
+                    val projected = runCatching {
+                        readinessService.projectedReadinessSeries(from = start, to = end, today = today)
+                    }.getOrDefault(emptyMap())
+                    val conflicts = runCatching {
+                        readinessService.planConflicts(today = today, through = end)
+                    }.getOrDefault(emptyList())
+
+                    _uiState.value = _uiState.value.copy(
+                        projectedReadiness = projected.mapValues { (_, assessment) -> assessment.score },
+                        // One message per day: the advisor already reports the worst channel for a
+                        // given session, and a grid cell has room for one line at most.
+                        planConflicts = conflicts.associate { it.date to it.message }
+                    )
+                }
+        }
     }
 
     private fun loadIncludeImportedPreference() {

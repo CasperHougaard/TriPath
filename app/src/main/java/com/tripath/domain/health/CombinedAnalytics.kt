@@ -115,8 +115,12 @@ object CombinedAnalytics {
         zone: ZoneId = ZoneId.systemDefault(),
         /** Whole-day steps, calories and HRV. Empty is fine — NEAT falls back to the profile. */
         dailyActivity: List<DailyActivityLog> = emptyList(),
-        /** Future load from [com.tripath.domain.ProjectionSource]. Feeds tomorrow-aware carb targets. */
-        plannedTssByDate: Map<LocalDate, Int> = emptyMap()
+        /**
+         * What is planned from today onward — see [PlannedLoad]. This is what makes today's
+         * carbohydrate target account for tomorrow's long session; [PlannedLoad.NONE] falls back to
+         * actuals only, which is correct for a purely historical read.
+         */
+        plannedLoad: PlannedLoad = PlannedLoad.NONE
     ): CombinedAnalysis {
         val workouts = allWorkouts.filter { !it.isIgnored }
         val windowStart = today.minusDays(periodDays)
@@ -162,10 +166,11 @@ object CombinedAnalytics {
             bodyComposition = bodyComposition,
             dailyActivity = dailyActivity,
             profile = profile,
-            plannedTssByDate = plannedTssByDate,
+            plannedTssByDate = plannedLoad.tssByDate,
             windowStart = windowStart,
             today = today,
-            weightByDate = weightByDate
+            weightByDate = weightByDate,
+            plannedMinutesByDate = plannedLoad.minutesByDate
         )
         val fuelByDate = fuel.days.associateBy { it.date }
 

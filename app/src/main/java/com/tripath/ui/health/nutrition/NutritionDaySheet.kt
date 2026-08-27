@@ -30,10 +30,12 @@ import androidx.compose.ui.unit.dp
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionLog
 import com.tripath.ui.theme.Spacing
+import com.tripath.ui.theme.TriPathTheme
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 
 private val DayTitleFormat = DateTimeFormatter.ofPattern("EEEE d MMM")
 private val EntryTimeFormat = DateTimeFormatter.ofPattern("HH:mm")
@@ -56,7 +58,9 @@ fun NutritionDaySheet(
     onUndoEntry: (Long) -> Unit,
     onEditTotals: () -> Unit,
     onClearDay: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /** What this day required and what it was doing. Null on a day the fuel model could not size. */
+    fuel: FuelHistoryDay? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -77,6 +81,8 @@ fun NutritionDaySheet(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            fuel?.let { DayRequirement(it) }
 
             HorizontalDivider()
 
@@ -152,6 +158,67 @@ private fun NutritionEntryRow(entry: NutritionEntry, onUndo: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * What the day asked for, against what it got, with the sessions that set the requirement.
+ *
+ * The gap is stated in words rather than left as arithmetic between two rows: "830 kcal short" is
+ * the sentence the athlete came here to read, and making them subtract is how a screen full of
+ * numbers ends up telling nobody anything.
+ */
+@Composable
+private fun DayRequirement(fuel: FuelHistoryDay) {
+    val needed = listOfNotNull(
+        fuel.neededKcal?.let { "%,.0f kcal".format(it) },
+        fuel.neededProteinG?.let { "%.0f g protein".format(it) },
+        fuel.neededCarbsG?.let { "%.0f g carbs".format(it) }
+    )
+    if (needed.isEmpty() && fuel.activities.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+        if (needed.isNotEmpty()) {
+            Text(
+                text = "Needed ${needed.joinToString(" · ")}" +
+                    (fuel.dayKind?.let { " (${it.phrase})" } ?: ""),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        val energyGap = gapLine("Energy", fuel.eatenKcal, fuel.neededKcal, "kcal")
+        val proteinGap = gapLine("Protein", fuel.eatenProteinG, fuel.neededProteinG, "g")
+        listOfNotNull(energyGap, proteinGap).forEach { (text, isShort) ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isShort) TriPathTheme.colors.negative else TriPathTheme.colors.positive
+            )
+        }
+
+        if (fuel.activities.isNotEmpty()) {
+            Text(
+                text = fuel.activities.joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * "Energy: 830 kcal short" / "Protein: 12 g over", or null when there is nothing to compare.
+ *
+ * A missing intake is a day that was not logged, not a day of eating nothing, so it produces no line
+ * at all rather than a shortfall equal to the whole requirement.
+ */
+private fun gapLine(label: String, eaten: Double?, needed: Double?, unit: String): Pair<String, Boolean>? {
+    if (eaten == null || needed == null) return null
+    val delta = eaten - needed
+    if (abs(delta) < 1.0) return "$label: on target" to false
+    val short = delta < 0
+    val amount = "%,.0f $unit".format(abs(delta))
+    return "$label: $amount ${if (short) "short" else "over"}" to short
 }
 
 /** "1,840 kcal · 112 g protein · creatine ✓", or a plain note when the day holds nothing. */

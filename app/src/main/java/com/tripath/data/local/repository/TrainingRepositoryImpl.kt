@@ -7,7 +7,9 @@ import com.tripath.data.local.database.dao.DayTemplateDao
 import com.tripath.data.local.database.dao.LiftPathDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
+import com.tripath.data.local.database.dao.NutritionPresetDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
+import com.tripath.data.local.database.dao.ScannedFoodDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
 import com.tripath.data.local.database.dao.WellnessDao
@@ -45,8 +47,10 @@ class TrainingRepositoryImpl @Inject constructor(
     private val bodyCompositionDao: BodyCompositionDao,
     private val nutritionLogDao: NutritionLogDao,
     private val nutritionEntryDao: NutritionEntryDao,
+    private val nutritionPresetDao: NutritionPresetDao,
     private val dailyActivityDao: DailyActivityDao,
-    private val liftPathDao: LiftPathDao
+    private val liftPathDao: LiftPathDao,
+    private val scannedFoodDao: ScannedFoodDao
 ) : TrainingRepository {
 
     // ==================== Training Plan Operations ====================
@@ -232,9 +236,11 @@ class TrainingRepositoryImpl @Inject constructor(
             bodyCompositionDao.deleteAll()
             nutritionLogDao.deleteAll()
             nutritionEntryDao.deleteAll()
+            nutritionPresetDao.deleteAll()
             dailyActivityDao.deleteAll()
             liftPathDao.deleteAllSessions()
             liftPathDao.deleteAllExercises()
+            scannedFoodDao.deleteAll()
             // Clear user profile from DataStore
             preferencesManager.deleteUserProfile()
         }

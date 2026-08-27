@@ -8,12 +8,14 @@ import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DailyActivityDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
+import com.tripath.data.local.database.dao.NutritionPresetDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.entities.BodyCompositionLog
 import com.tripath.data.local.database.entities.DailyActivityLog
 import com.tripath.data.local.database.entities.NutritionEntry
 import com.tripath.data.local.database.entities.NutritionEntryKind
 import com.tripath.data.local.database.entities.NutritionLog
+import com.tripath.data.local.database.entities.NutritionPreset
 import com.tripath.data.local.database.entities.SleepLog
 import com.tripath.widget.refreshNutritionWidget
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,6 +24,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 import javax.inject.Inject
 
 class RecoveryRepositoryImpl @Inject constructor(
@@ -30,6 +33,7 @@ class RecoveryRepositoryImpl @Inject constructor(
     private val sleepLogDao: SleepLogDao,
     private val nutritionLogDao: NutritionLogDao,
     private val nutritionEntryDao: NutritionEntryDao,
+    private val nutritionPresetDao: NutritionPresetDao,
     private val database: AppDatabase,
     @ApplicationContext private val context: Context
 ) : RecoveryRepository {
@@ -206,5 +210,41 @@ class RecoveryRepositoryImpl @Inject constructor(
             }
         }
         refreshNutritionWidget()
+    }
+
+    override fun getNutritionPresets(): Flow<List<NutritionPreset>> =
+        nutritionPresetDao.getAll()
+
+    override suspend fun saveNutritionPreset(
+        label: String,
+        kcal: Double?,
+        protein: Double?,
+        carbs: Double?,
+        fat: Double?
+    ) {
+        withContext(Dispatchers.IO) {
+            // Saving the same name twice updates that preset rather than adding a second one. Two
+            // rows reading "Protein shake" in a label-ordered list are indistinguishable, and the
+            // athlete has no way to tell which of them a delete would remove.
+            val trimmed = label.trim()
+            val existing = nutritionPresetDao.findByLabel(trimmed)
+            nutritionPresetDao.insert(
+                NutritionPreset(
+                    id = existing?.id ?: UUID.randomUUID().toString(),
+                    label = trimmed,
+                    kcal = kcal,
+                    proteinG = protein,
+                    carbsG = carbs,
+                    fatG = fat,
+                    createdAt = existing?.createdAt ?: System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    override suspend fun deleteNutritionPreset(preset: NutritionPreset) {
+        withContext(Dispatchers.IO) {
+            nutritionPresetDao.delete(preset)
+        }
     }
 }

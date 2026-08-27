@@ -41,6 +41,7 @@ import com.tripath.data.model.WorkoutType
 import com.tripath.domain.running.RunPlanDisplayMetrics
 import com.tripath.ui.components.SectionHeader
 import com.tripath.ui.navigation.Screen
+import com.tripath.ui.theme.freshnessColor
 import com.tripath.ui.theme.plannedContentTint
 import com.tripath.ui.theme.Spacing
 import com.tripath.ui.theme.TriPathTheme
@@ -238,9 +239,41 @@ fun WeeklyPlannerScreen(
                         onCopyWeek = { viewModel.copyWeek(weekRow.weekStart) },
                         weekNumber = weekRow.weekNumber,
                         thresholdRunPace = uiState.userProfile?.thresholdRunPace,
-                        dayTotalDisplayMode = dayTotalDisplayMode
+                        dayTotalDisplayMode = dayTotalDisplayMode,
+                        projectedReadiness = uiState.projectedReadiness,
+                        planConflicts = uiState.planConflicts
                     )
                 }
+                // Says what the dots mean. A coloured mark nobody can decode is worse than no mark:
+                // it looks like information and carries none.
+                if (uiState.projectedReadiness.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(Spacing.xs))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(freshnessColor(85))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(freshnessColor(20))
+                        )
+                        Text(
+                            text = "Projected readiness on planned days, fresh to depleted — from " +
+                                "planned training only. A larger dot means the plan stacks a tissue.",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+
                 if (uiState.disciplineDistribution.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(Spacing.md))
                     DisciplineDistributionBar(
@@ -268,6 +301,10 @@ fun WeeklyRow(
     weekNumber: Int,
     thresholdRunPace: Int? = null,
     dayTotalDisplayMode: DayTotalDisplayMode,
+    /** Projected readiness score per upcoming day. Empty until the projection lands. */
+    projectedReadiness: Map<LocalDate, Int> = emptyMap(),
+    /** Days the plan stacks onto tissue that will not have recovered, keyed to the explanation. */
+    planConflicts: Map<LocalDate, String> = emptyMap(),
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -303,6 +340,8 @@ fun WeeklyRow(
                     onWorkoutClick = onWorkoutClick,
                     thresholdRunPace = thresholdRunPace,
                     dayTotalDisplayMode = dayTotalDisplayMode,
+                    projectedReadiness = projectedReadiness[day.date],
+                    hasPlanConflict = planConflicts.containsKey(day.date),
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -355,6 +394,13 @@ fun DayCell(
     onWorkoutClick: (String, Boolean) -> Unit,
     thresholdRunPace: Int? = null,
     dayTotalDisplayMode: DayTotalDisplayMode = DayTotalDisplayMode.TSS,
+    /**
+     * Readiness projected from planned training, for a future day. Null for today, the past, and
+     * until the projection has been computed.
+     */
+    projectedReadiness: Int? = null,
+    /** True when this day's plan lands on tissue the model expects to still be loaded. */
+    hasPlanConflict: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Build day totals with replacement rule:
@@ -527,6 +573,20 @@ fun DayCell(
                         .padding(2.dp),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp)
                 )
+            } else if (projectedReadiness != null && day.workouts.isNotEmpty()) {
+                // A projection, and only on days that actually have something planned — a coloured
+                // dot on an empty Thursday would be answering a question nobody asked. It goes
+                // where the special-period marker goes and yields to it, because an injury is a
+                // fact about the day and this is a forecast.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp)
+                        .size(if (hasPlanConflict) 6.dp else 4.dp)
+                        .clip(CircleShape)
+                        .background(freshnessColor(projectedReadiness)),
+                    contentAlignment = Alignment.Center
+                ) {}
             }
         }
     }

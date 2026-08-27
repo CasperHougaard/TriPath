@@ -8,9 +8,12 @@ import com.tripath.data.local.database.dao.BodyCompositionDao
 import com.tripath.data.local.database.dao.DailyActivityDao
 import com.tripath.data.local.database.dao.DayNoteDao
 import com.tripath.data.local.database.dao.DayTemplateDao
+import com.tripath.data.local.database.dao.LiftPathDao
 import com.tripath.data.local.database.dao.NutritionEntryDao
 import com.tripath.data.local.database.dao.NutritionLogDao
+import com.tripath.data.local.database.dao.NutritionPresetDao
 import com.tripath.data.local.database.dao.RawWorkoutDataDao
+import com.tripath.data.local.database.dao.ScannedFoodDao
 import com.tripath.data.local.database.dao.SleepLogDao
 import com.tripath.data.local.database.dao.SpecialPeriodDao
 import com.tripath.data.local.database.dao.TrainingPlanDao
@@ -29,6 +32,8 @@ import com.tripath.data.local.database.migrations.MIGRATION_18_19
 import com.tripath.data.local.database.migrations.MIGRATION_19_20
 import com.tripath.data.local.database.migrations.MIGRATION_20_21
 import com.tripath.data.local.database.migrations.MIGRATION_21_22
+import com.tripath.data.local.database.migrations.MIGRATION_22_23
+import com.tripath.data.local.database.migrations.MIGRATION_23_24
 import com.tripath.data.local.database.migrations.MIGRATION_2_3
 import com.tripath.data.local.database.migrations.MIGRATION_3_4
 import com.tripath.data.local.database.migrations.MIGRATION_4_5
@@ -85,7 +90,9 @@ object DatabaseModule {
                 MIGRATION_18_19,
                 MIGRATION_19_20,
                 MIGRATION_20_21,
-                MIGRATION_21_22
+                MIGRATION_21_22,
+                MIGRATION_22_23,
+                MIGRATION_23_24
             )
             .apply {
                 // Debug only. In release this fallback would silently delete every workout,
@@ -161,6 +168,12 @@ object DatabaseModule {
 
     @Provides
     @Singleton
+    fun provideNutritionPresetDao(database: AppDatabase): NutritionPresetDao {
+        return database.nutritionPresetDao()
+    }
+
+    @Provides
+    @Singleton
     fun provideWellnessDao(database: AppDatabase): WellnessDao {
         return database.wellnessDao()
     }
@@ -169,6 +182,18 @@ object DatabaseModule {
     @Singleton
     fun provideDailyActivityDao(database: AppDatabase): DailyActivityDao {
         return database.dailyActivityDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideLiftPathDao(database: AppDatabase): LiftPathDao {
+        return database.liftPathDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideScannedFoodDao(database: AppDatabase): ScannedFoodDao {
+        return database.scannedFoodDao()
     }
 }
 
